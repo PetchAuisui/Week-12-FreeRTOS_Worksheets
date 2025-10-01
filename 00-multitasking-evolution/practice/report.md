@@ -1,5 +1,5 @@
 # บันทึกผลการทดลอง
-## Lab-01
+## lab1-single-vs-multi
 ### Result
 #### Part 1: Single Task System
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/54eacc75-36e8-4401-bf18-d8365122efc1" />
