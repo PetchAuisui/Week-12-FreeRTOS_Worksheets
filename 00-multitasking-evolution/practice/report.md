@@ -1,5 +1,5 @@
 # บันทึกผลการทดลอง
-## lab1-single-vs-multi
+## Lab1-single-vs-multi
 ### Result
 #### Part 1: Single Task System
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/54eacc75-36e8-4401-bf18-d8365122efc1" />
@@ -22,3 +22,11 @@
 - อาจมี overhead จากการสลับงาน (context switching) ทำให้การใช้ทรัพยากรไม่เต็มประสิทธิภาพ
 - ถ้ามีงานเยอะเกินไป ระบบอาจเกิด แย่ง CPU/Memory ทำให้ช้าลง
 - การจัดการยากกว่า single task เพราะต้องคุมลำดับความสำคัญ (priority) และป้องกันปัญหา deadlock/ starvation
+
+## Lab 2: Time-Sharing Implementation
+### Result 
+#### Time-Sharing with Variable Workloads
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/a978752d-f3ce-42b3-a63f-2a21f544fa24" />
+
+#### การวิเคราะห์ปัญหา
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/a8140e7b-7dc6-4b08-ac8a-e9f772907e68" />
