@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/CMakeFiles/bootloader
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/CMakeFiles/bootloader.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/CMakeFiles/bootloader-complete.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+C:/Users/Petch/OneDrive/Documents/VScode/Week-12-FreeRTOS_Worksheets/Lab-12/Lab-00/Single/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
