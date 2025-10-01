@@ -9,3 +9,6 @@
 <img width="1918" height="1079" alt="image" src="https://github.com/user-attachments/assets/9ca99415-1b8d-4f79-ac22-6ae5295a0d6e" />
 
 #### Exercise-2
+<img width="1919" height="1078" alt="image" src="https://github.com/user-attachments/assets/eae89076-ae02-4666-828e-bf0a04f50bb0" />
+
+#### Exercise-3
