@@ -1,5 +1,5 @@
 # บันทึกผลการทดลอง
-## Lab-01
+## Lab1-single-vs-multi
 ### Result
 #### Part 1: Single Task System
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/54eacc75-36e8-4401-bf18-d8365122efc1" />
@@ -22,3 +22,34 @@
 - อาจมี overhead จากการสลับงาน (context switching) ทำให้การใช้ทรัพยากรไม่เต็มประสิทธิภาพ
 - ถ้ามีงานเยอะเกินไป ระบบอาจเกิด แย่ง CPU/Memory ทำให้ช้าลง
 - การจัดการยากกว่า single task เพราะต้องคุมลำดับความสำคัญ (priority) และป้องกันปัญหา deadlock/ starvation
+
+## Lab 2: Time-Sharing Implementation
+### Result 
+#### Time-Sharing with Variable Workloads
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/a978752d-f3ce-42b3-a63f-2a21f544fa24" />
+
+#### การวิเคราะห์ปัญหา
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/a8140e7b-7dc6-4b08-ac8a-e9f772907e68" />
+
+### คำถามสำหรับวิเคราะห์
+1. Time slice ขนาดไหนให้ประสิทธิภาพดีที่สุด? เพราะอะไร?
+- ขนาดที่ พอดี ไม่สั้นเกินไปและไม่ยาวเกินไป (มักอยู่ระดับ 10–100 ms)
+- เพราะ:
+  - สั้นพอ ที่ผู้ใช้จะรู้สึกว่าระบบตอบสนองเร็ว (interactive)
+  - ยาวพอ ที่แต่ละงานจะทำงานได้จริงก่อนถูกสลับออก (ลด context switching overhead)
+2. ปัญหาอะไรที่เกิดขึ้นเมื่อ time slice สั้นเกินไป?
+- Context switching บ่อยเกินไป → CPU เสียเวลาเปลี่ยนงานแทนที่จะประมวลผลงานจริง
+- ทำให้ ประสิทธิภาพรวมลดลง เพราะ overhead สูง
+- งานที่ต้องการ CPU ต่อเนื่อง (CPU-bound) จะช้าลงมาก
+3. ปัญหาอะไรที่เกิดขึ้นเมื่อ time slice ยาวเกินไป?
+- งานที่รันอยู่จะ ผูกขาด CPU นานเกินไป → งานอื่นต้องรอนาน
+- ส่งผลให้ การตอบสนองของระบบแย่ลง (เช่น input จากผู้ใช้หน่วง)
+เหมือนระบบกลับไปใกล้ single task มากขึ้น
+4. Context switching overhead คิดเป็นกี่เปอร์เซ็นต์ของเวลาทั้งหมด?
+- ขึ้นอยู่กับสถาปัตยกรรมและ workload แต่โดยทั่วไปอยู่ที่ 1–5% ของเวลาทั้งหมด
+- ถ้า time slice สั้นเกินไป overhead อาจพุ่งถึง 10%+
+- ระบบจริง (เช่น Linux) จึงเลือกค่า time slice ที่สมดุล เช่น ~10–20ms
+5. งานไหนที่ได้รับผลกระทบมากที่สุดจากการ time-sharing?
+-  งาน CPU-bound (ต้องใช้ CPU ต่อเนื่อง) → โดนสลับออกก่อนเสร็จ ต้องรอรอบใหม่เสมอ
+-  งาน Real-time (ต้องตอบสนองทันเวลา) → เสี่ยงพลาด deadline ถ้า time slice ยาวไป
+-  ส่วน งาน I/O-bound (รอ I/O บ่อย) มักไม่ค่อยได้รับผลกระทบมาก เพราะมันยอมปล่อย CPU เองอยู่แล้ว
