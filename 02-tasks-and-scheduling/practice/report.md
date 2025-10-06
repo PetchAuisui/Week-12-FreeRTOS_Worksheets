@@ -1,11 +1,21 @@
 # บันทึกผลการทดลอง
 ## Lab 1: Task Priority และ Scheduling
-### Result
-- Step 1: Basic Priority Demonstration
-<img width="1913" height="1071" alt="image" src="https://github.com/user-attachments/assets/7a9f1d47-5e79-4987-8ee3-54c887d36fdb" />
+### Exercise-1
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/f1a63ec5-3b9d-4011-8f67-3acfa07bf5ab" />
 
-- Step 2: Round-Robin Scheduling (15 นาที)
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/d6ed679b-2cd0-4a4c-bfc8-30b34c056c0c" />
+### Exercise-2
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/576e1040-6593-4619-aceb-591f5aca6667" />
 
-- Step 3: Priority Inversion Demo
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/a513cd6f-b9c4-4ff5-b613-ac124b4ed1e6" />
+## Lab 2: Task States Demonstration
+### Exercise-1
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/72a5c3c3-f4ea-4e5b-bd1a-98aaefcb6a4e" />
+
+### Exercise-2
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/4ce261e2-d716-409c-b315-b7705a7d47aa" />
+
+## Lab 3: Stack Monitoring และ Debugging
+### Exercise-1
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/d8d8539d-73ba-4359-ad81-b85112da5c53" />
+
+### Exercise-2
+<img width="1918" height="1079" alt="image" src="https://github.com/user-attachments/assets/cbfdc433-948c-43ef-841c-43b28a6f0fd3" />
