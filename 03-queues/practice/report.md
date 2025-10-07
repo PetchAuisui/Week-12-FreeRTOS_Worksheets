@@ -1,4 +1,3 @@
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/71dd22f1-e389-4f0a-9cfd-f8c3d6ca5baa" /># 03. Queues - Inter-Task Communication
 ## Lab 1: Basic Queue Operations
 ### result
 - ทดลองที่ 1
