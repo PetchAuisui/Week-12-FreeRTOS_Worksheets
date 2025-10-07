@@ -1,4 +1,4 @@
-# 03. Queues - Inter-Task Communication
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/71dd22f1-e389-4f0a-9cfd-f8c3d6ca5baa" /># 03. Queues - Inter-Task Communication
 ## Lab 1: Basic Queue Operations
 ### result
 - ทดลองที่ 1
@@ -14,3 +14,15 @@
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/b5fe846e-6dc7-4766-97e4-8e583fbea5f8" />
 
 ## Lab 2: Producer-Consumer System
+### result
+- ทดลองที่ 1
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/5a7194f8-9d06-4d53-b8d2-f5076d82e064" />
+
+- ทดลองที่ 2
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/85a76718-2851-4046-a9a1-a637740539bd" />
+
+- ทดลองที่ 3
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/ce65cfc1-0d9e-4df1-8aff-635e738d6554" />
+
+- 🔧 การปรับแต่งเพิ่มเติม
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/4c40536c-4264-496a-b39b-cbb8173a2e72" />
