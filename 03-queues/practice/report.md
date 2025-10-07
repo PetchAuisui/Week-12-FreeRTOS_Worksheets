@@ -13,6 +13,13 @@
 -🔧 การปรับแต่งเพิ่มเติม
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/b5fe846e-6dc7-4766-97e4-8e583fbea5f8" />
 
+### 📊 การสังเกตและบันทึกผล
+| ทดลอง | Sender Rate | Receiver Rate | Queue Status | สังเกต |
+|-------|-------------|---------------|--------------|---------|
+| 1 | 2s | 1.5s | Normal | เห็น Messages 1–3 ตลอด, LED กะพริบสม่ำเสมอ|
+| 2 | 0.5s | 1.5s | Full | Messages ค้างที่ 5, ขึ้น Warning “Queue full!”|
+| 3 | 2s | 0.1s | Empty | Messages = 0, Free spaces = 5, มี log “No message received”|
+
 ## Lab 2: Producer-Consumer System
 ### result
 - ทดลองที่ 1
@@ -26,6 +33,13 @@
 
 - 🔧 การปรับแต่งเพิ่มเติม
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/4c40536c-4264-496a-b39b-cbb8173a2e72" />
+
+### 📊 การสังเกตและบันทึกผล
+| ทดลอง | Producers | Consumers | Produced | Consumed | Dropped | Efficiency |
+|-------|-----------|-----------|----------|----------|---------|------------|
+| 1 | 3 | 2 | 3| 2| 0| 66.7%|
+| 2 | 4 | 2 | 4| 2| 0| 50.0%|
+| 3 | 3 | 1 | 3| 1| 0| 33.3%|
 
 ## Lab 3: Queue Sets Implementation
 ### result
