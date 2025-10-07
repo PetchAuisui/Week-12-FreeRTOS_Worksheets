@@ -10,4 +10,7 @@
 - ทดสอบที่ 3
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/2609718f-6b6c-49ea-a4f4-7ebf502b25fd" />
 
+-🔧 การปรับแต่งเพิ่มเติม
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/b5fe846e-6dc7-4766-97e4-8e583fbea5f8" />
+
 ## Lab 2: Producer-Consumer System
