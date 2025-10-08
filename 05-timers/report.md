@@ -1,4 +1,4 @@
-# บันทึกผลการทดลอง
+<img width="1919" height="1077" alt="image" src="https://github.com/user-attachments/assets/587eac66-c810-4a7f-85d6-9336f34e444f" /># บันทึกผลการทดลอง
 ## Lab 1: Basic Software Timers
 ### result
 - การทดลองที่ 1
@@ -28,12 +28,17 @@
 
 ## Lab 2: Timer Applications - Watchdog & LED Patterns
 ### result
-- การทดลองที่ 1
-
-- การทดลองที่ 2
+- การทดลองที่ 1 - 2
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/97eb2ea6-51b7-45cd-a824-4fb986140f22" />
 
 - การทดลองที่ 3
+<img width="1919" height="1077" alt="image" src="https://github.com/user-attachments/assets/88c566ea-5332-4a1b-b1d2-e3cefc14f966" />
 
+- การทดลองที่ 4
+<img width="1919" height="1078" alt="image" src="https://github.com/user-attachments/assets/9e0a018f-0c61-4541-b9c1-502b8195abf1" />
+
+- การทดลองที่ 5
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/e940b77d-54ac-4e19-89e7-fa8b377c7b68" />
 
 ### 📋 Post-Lab Questions
 1. **Watchdog Design**: เหตุใดต้องใช้ separate timer สำหรับ feeding watchdog?
