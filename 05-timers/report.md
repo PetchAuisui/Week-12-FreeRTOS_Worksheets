@@ -4,7 +4,7 @@
 - การทดลองที่ 1
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/66268e25-349c-414e-a885-9b9357e583fc" />
 
-- การทดลองที่ 2
+- กาทดลองที่ 2
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/faa994af-c52e-4e17-9b8d-855b453195aa" />
 
 - การทดลองที่ 3
@@ -90,3 +90,10 @@
 3. **Network Watchdog**: ส่ง heartbeat ผ่าน network
 4. **Pattern Learning**: บันทึกและเรียนรู้ pattern ที่นิยม
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/53318021-3023-4a74-9867-b8edf65d9d5a" />
+
+## Lab 3: Counting Semaphores
+### result
+- ทดลองที่ 1
+<img width="1918" height="1078" alt="image" src="https://github.com/user-attachments/assets/c07184f7-85da-48ee-88fe-d62ddab72558" />
+
+- ทดลองที่ 2
