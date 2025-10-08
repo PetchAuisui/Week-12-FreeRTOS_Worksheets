@@ -1,330 +1,322 @@
+// main.c - Real-time Scheduler (Priority + Deadline + Load Balancing)
+// ESP-IDF v5.x
+
 #include <stdio.h>
-#include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "driver/gpio.h"
-#include "esp_random.h"
+#include "esp_rom_sys.h"
 
-static const char *TAG = "COUNTING_SEM";
+static const char *TAG = "RT_SCHED";
 
-// LED pins for visualization
-#define LED_RESOURCE_1 GPIO_NUM_2
-#define LED_RESOURCE_2 GPIO_NUM_4
-#define LED_RESOURCE_3 GPIO_NUM_5
-#define LED_PRODUCER GPIO_NUM_18
-#define LED_SYSTEM GPIO_NUM_19
+// ====== Demo GPIO (optional visual) ======
+#define LED_OK      GPIO_NUM_2     // แจ้งสถานะปกติ (วิ่งงาน)
+#define LED_MISS    GPIO_NUM_4     // กระพริบเมื่อ deadline miss
+#define LED_SCHED   GPIO_NUM_5     // กระพริบเมื่อ scheduler dispatch
 
-// Configuration
-#define MAX_RESOURCES 3  // Maximum number of resources available
-#define NUM_PRODUCERS 5  // Number of producer tasks
-#define NUM_CONSUMERS 3  // Number of consumer tasks
+// ====== Config ======
+#define NUM_WORKERS         2      // worker tasks (pin ลงคนละ core)
+#define WORKER_STACK        4096
+#define SCHED_STACK         6144
+#define MON_STACK           4096
+#define LOAD_STACK          3072
 
-// Semaphore handle
-SemaphoreHandle_t xCountingSemaphore;
+#define SCHED_TICK_MS       10     // ช่วง scheduler loop (ไม่ใช่ period งาน)
+#define DISPATCH_BUDGET     8      // max jobs dispatch per tick (กัน starvation)
+#define WORKER_QUEUE_LEN    16
+#define COMPLETE_QUEUE_LEN  32
 
-// Resource management
+// ====== Job Model ======
 typedef struct {
-    int resource_id;
-    bool in_use;
-    char current_user[20];
-    uint32_t usage_count;
-    uint32_t total_usage_time;
-} resource_t;
+    int     id;
+    char    name[16];
+    int     priority;          // มาก = สำคัญกว่า
+    uint32_t period_ms;        // คาบของงาน
+    uint32_t wcet_ms;          // เวลาใช้จริงโดยประมาณ (เดโม)
+    uint32_t deadline_ms;      // relative deadline จาก release
 
-resource_t resources[MAX_RESOURCES] = {
-    {1, false, "", 0, 0},
-    {2, false, "", 0, 0},
-    {3, false, "", 0, 0}
+    // runtime
+    int64_t next_release_us;   // เวลา release รอบถัดไป
+    // stats
+    uint32_t releases;
+    uint32_t completions;
+    uint32_t deadline_miss;
+    uint64_t sum_response_ms;
+    uint32_t max_response_ms;
+} job_desc_t;
+
+typedef struct {
+    int     job_id;
+    int     priority;
+    uint32_t exec_ms;
+    int64_t  abs_deadline_us;
+    int64_t  release_us;
+} worker_cmd_t;
+
+typedef struct {
+    int     job_id;
+    int64_t finish_us;
+    int64_t abs_deadline_us;
+    int64_t release_us;
+} completion_t;
+
+// ====== Demo jobs ======
+enum { JOB_A = 0, JOB_B, JOB_C, NUM_JOBS };
+static job_desc_t g_jobs[NUM_JOBS] = {
+    { .id=JOB_A, .name="A", .priority=3, .period_ms=50,  .wcet_ms=12, .deadline_ms=40 },
+    { .id=JOB_B, .name="B", .priority=2, .period_ms=100, .wcet_ms=20, .deadline_ms=60 },
+    { .id=JOB_C, .name="C", .priority=1, .period_ms=200, .wcet_ms=60, .deadline_ms=150 },
 };
 
-// System statistics
+// ====== Queues & Handles ======
+static QueueHandle_t q_worker[NUM_WORKERS];
+static QueueHandle_t q_complete;
+static TaskHandle_t  h_worker[NUM_WORKERS];
+
+// ====== Helpers ======
+static inline int64_t now_us(void) { return esp_timer_get_time(); }
+
+static void busy_exec_ms(uint32_t ms)
+{
+    // เดโม: ใช้ vTaskDelay เพื่อไม่บล็อก scheduler จริง (ถ้าต้องการ busy loop ให้เปลี่ยน)
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+static void blink_once(gpio_num_t pin, int ms)
+{
+    gpio_set_level(pin, 1);
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    gpio_set_level(pin, 0);
+}
+
+// เลือก worker ตามความยาวคิว (น้อยกว่าดีกว่า)
+static int select_worker(void)
+{
+    int best = 0;
+    UBaseType_t best_len = uxQueueMessagesWaiting(q_worker[0]);
+    for (int i=1;i<NUM_WORKERS;i++){
+        UBaseType_t l = uxQueueMessagesWaiting(q_worker[i]);
+        if (l < best_len) { best = i; best_len = l; }
+    }
+    return best;
+}
+
+// ====== Worker ======
+static void worker_task(void *arg)
+{
+    int wid = (int)(intptr_t)arg;
+    gpio_num_t led = LED_OK;
+
+    ESP_LOGI(TAG, "Worker %d start", wid);
+    while (1) {
+        worker_cmd_t cmd;
+        if (xQueueReceive(q_worker[wid], &cmd, portMAX_DELAY) == pdTRUE) {
+            // ทำงาน
+            // int64_t start_us = now_us(); // ไม่ได้ใช้งาน - ถ้าต้องใช้ response breakdown ค่อยเปิด
+            busy_exec_ms(cmd.exec_ms);
+            int64_t fin_us = now_us();
+
+            // ส่งผลกลับ
+            completion_t c = {
+                .job_id = cmd.job_id,
+                .finish_us = fin_us,
+                .abs_deadline_us = cmd.abs_deadline_us,
+                .release_us = cmd.release_us
+            };
+            xQueueSend(q_complete, &c, 0);
+
+            // วิชวลเล็กน้อย
+            blink_once(led, 5);
+        }
+    }
+}
+
+// ====== Scheduler ======
 typedef struct {
-    uint32_t total_requests;
-    uint32_t successful_acquisitions;
-    uint32_t failed_acquisitions;
-    uint32_t resources_in_use;
-    uint32_t average_wait_time;
-} system_stats_t;
+    int job_id;
+    int priority;
+    int64_t abs_deadline_us;
+    int64_t release_us;
+} ready_item_t;
 
-system_stats_t stats = {0, 0, 0, 0, 0};
-
-// Find available resource and mark as in use
-int acquire_resource(const char* user_name) {
-    for (int i = 0; i < MAX_RESOURCES; i++) {
-        if (!resources[i].in_use) {
-            resources[i].in_use = true;
-            strcpy(resources[i].current_user, user_name);
-            resources[i].usage_count++;
-            
-            // Turn on corresponding LED
-            switch (i) {
-                case 0: gpio_set_level(LED_RESOURCE_1, 1); break;
-                case 1: gpio_set_level(LED_RESOURCE_2, 1); break;
-                case 2: gpio_set_level(LED_RESOURCE_3, 1); break;
-            }
-            
-            stats.resources_in_use++;
-            return i; // Return resource index
-        }
+static void scheduler_task(void *arg)
+{
+    // ตั้งค่า next_release ครั้งแรก
+    int64_t t0 = now_us();
+    for (int i=0;i<NUM_JOBS;i++){
+        g_jobs[i].next_release_us = t0; // เริ่มพร้อมกัน
     }
-    return -1; // No resource available
-}
 
-// Release resource and mark as available
-void release_resource(int resource_index, uint32_t usage_time) {
-    if (resource_index >= 0 && resource_index < MAX_RESOURCES) {
-        resources[resource_index].in_use = false;
-        strcpy(resources[resource_index].current_user, "");
-        resources[resource_index].total_usage_time += usage_time;
-        
-        // Turn off corresponding LED
-        switch (resource_index) {
-            case 0: gpio_set_level(LED_RESOURCE_1, 0); break;
-            case 1: gpio_set_level(LED_RESOURCE_2, 0); break;
-            case 2: gpio_set_level(LED_RESOURCE_3, 0); break;
-        }
-        
-        stats.resources_in_use--;
-    }
-}
+    // เตรียม GPIO
+    gpio_set_direction(LED_SCHED, GPIO_MODE_OUTPUT);
+    gpio_set_direction(LED_OK, GPIO_MODE_OUTPUT);
+    gpio_set_direction(LED_MISS, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_SCHED, 0);
+    gpio_set_level(LED_OK, 0);
+    gpio_set_level(LED_MISS, 0);
 
-// Producer task - requests resources
-void producer_task(void *pvParameters) {
-    int producer_id = *((int*)pvParameters);
-    char task_name[20];
-    snprintf(task_name, sizeof(task_name), "Producer%d", producer_id);
-    
-    ESP_LOGI(TAG, "%s started", task_name);
-    
+    ready_item_t ready[NUM_JOBS];
+
+    ESP_LOGI(TAG, "Scheduler start (tick=%dms)", SCHED_TICK_MS);
+
     while (1) {
-        stats.total_requests++;
-        
-        ESP_LOGI(TAG, "🏭 %s: Requesting resource...", task_name);
-        
-        // Blink producer LED
-        gpio_set_level(LED_PRODUCER, 1);
-        vTaskDelay(pdMS_TO_TICKS(50));
-        gpio_set_level(LED_PRODUCER, 0);
-        
-        uint32_t start_time = xTaskGetTickCount();
-        
-        // Try to acquire counting semaphore (resource from pool)
-        if (xSemaphoreTake(xCountingSemaphore, pdMS_TO_TICKS(8000)) == pdTRUE) {
-            uint32_t wait_time = (xTaskGetTickCount() - start_time) * portTICK_PERIOD_MS;
-            stats.successful_acquisitions++;
-            
-            // Acquire actual resource
-            int resource_idx = acquire_resource(task_name);
-            
-            if (resource_idx >= 0) {
-                ESP_LOGI(TAG, "✓ %s: Acquired resource %d (wait: %lums)", 
-                        task_name, resource_idx + 1, wait_time);
-                
-                // Simulate resource usage
-                uint32_t usage_time = 1000 + (esp_random() % 3000); // 1-4 seconds
-                ESP_LOGI(TAG, "🔧 %s: Using resource %d for %lums", 
-                        task_name, resource_idx + 1, usage_time);
-                
-                vTaskDelay(pdMS_TO_TICKS(usage_time));
-                
-                // Release resource
-                release_resource(resource_idx, usage_time);
-                ESP_LOGI(TAG, "✓ %s: Released resource %d", task_name, resource_idx + 1);
-                
-                // Give back semaphore
-                xSemaphoreGive(xCountingSemaphore);
-                
+        int64_t tnow = now_us();
+
+        // 1) เก็บ ready jobs
+        int nready = 0;
+        for (int i=0;i<NUM_JOBS;i++){
+            if (tnow >= g_jobs[i].next_release_us) {
+                // สร้าง instance ใหม่
+                ready[nready].job_id = g_jobs[i].id;
+                ready[nready].priority = g_jobs[i].priority;
+                ready[nready].release_us = g_jobs[i].next_release_us;
+                ready[nready].abs_deadline_us = g_jobs[i].next_release_us + (int64_t)g_jobs[i].deadline_ms*1000;
+                nready++;
+
+                // อัปเดต release รอบถัดไป (periodic)
+                g_jobs[i].next_release_us += (int64_t)g_jobs[i].period_ms*1000;
+                g_jobs[i].releases++;
+            }
+        }
+
+        // 2) Sort ready ตาม priority (DESC) แล้วตาม earliest deadline (ASC)
+        for (int i=0;i<nready;i++){
+            for (int j=i+1;j<nready;j++){
+                bool swap = false;
+                if (ready[j].priority > ready[i].priority) swap = true;
+                else if (ready[j].priority == ready[i].priority &&
+                         ready[j].abs_deadline_us < ready[i].abs_deadline_us) swap = true;
+                if (swap){ ready_item_t tmp = ready[i]; ready[i]=ready[j]; ready[j]=tmp; }
+            }
+        }
+
+        // 3) Dispatch (limit budget/tick กันยาวไป)
+        int dispatched = 0;
+        for (int k=0;k<nready && dispatched<DISPATCH_BUDGET; k++){
+            int id = ready[k].job_id;
+            job_desc_t *jb = &g_jobs[id];
+
+            worker_cmd_t cmd = {
+                .job_id = id,
+                .priority = jb->priority,
+                .exec_ms = jb->wcet_ms,
+                .abs_deadline_us = ready[k].abs_deadline_us,
+                .release_us = ready[k].release_us
+            };
+
+            int w = select_worker();
+            if (xQueueSend(q_worker[w], &cmd, 0) == pdPASS){
+                dispatched++;
+                // กระพริบ LED scheduler สั้น ๆ
+                gpio_set_level(LED_SCHED, 1);
+                esp_rom_delay_us(300);   // ← แทน ets_delay_us(300)
+                gpio_set_level(LED_SCHED, 0);
+                ESP_LOGD(TAG, "Dispatch job %s -> worker %d (prio=%d, ddl=%" PRId64 ")",
+                         jb->name, w, jb->priority, cmd.abs_deadline_us);
             } else {
-                ESP_LOGE(TAG, "✗ %s: Semaphore acquired but no resource available!", task_name);
-                xSemaphoreGive(xCountingSemaphore); // Give back immediately
-            }
-            
-        } else {
-            stats.failed_acquisitions++;
-            ESP_LOGW(TAG, "⏰ %s: Timeout waiting for resource", task_name);
-        }
-        
-        // Wait before next request
-        vTaskDelay(pdMS_TO_TICKS(2000 + (esp_random() % 3000))); // 2-5 seconds
-    }
-}
-
-// Resource monitor task
-void resource_monitor_task(void *pvParameters) {
-    ESP_LOGI(TAG, "Resource monitor started");
-    
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(5000)); // Every 5 seconds
-        
-        int available_count = uxSemaphoreGetCount(xCountingSemaphore);
-        int used_count = MAX_RESOURCES - available_count;
-        
-        ESP_LOGI(TAG, "\n📊 RESOURCE POOL STATUS");
-        ESP_LOGI(TAG, "Available resources: %d/%d", available_count, MAX_RESOURCES);
-        ESP_LOGI(TAG, "Resources in use: %d", used_count);
-        
-        // Show individual resource status
-        for (int i = 0; i < MAX_RESOURCES; i++) {
-            if (resources[i].in_use) {
-                ESP_LOGI(TAG, "  Resource %d: BUSY (User: %s, Usage: %lu times)", 
-                        i + 1, resources[i].current_user, resources[i].usage_count);
-            } else {
-                ESP_LOGI(TAG, "  Resource %d: FREE (Total usage: %lu times)", 
-                        i + 1, resources[i].usage_count);
+                ESP_LOGW(TAG, "Worker %d queue full, defer job %s", w, jb->name);
+                // ระบบจริงอาจเก็บ carry-over queue
             }
         }
-        
-        // Visual representation
-        printf("Pool: [");
-        for (int i = 0; i < MAX_RESOURCES; i++) {
-            printf(resources[i].in_use ? "■" : "□");
-        }
-        printf("] Available: %d\n", available_count);
-        
-        ESP_LOGI(TAG, "═══════════════════════════\n");
-    }
-}
 
-// System statistics task
-void statistics_task(void *pvParameters) {
-    ESP_LOGI(TAG, "Statistics task started");
-    
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(12000)); // Every 12 seconds
-        
-        ESP_LOGI(TAG, "\n📈 SYSTEM STATISTICS");
-        ESP_LOGI(TAG, "Total requests: %lu", stats.total_requests);
-        ESP_LOGI(TAG, "Successful acquisitions: %lu", stats.successful_acquisitions);
-        ESP_LOGI(TAG, "Failed acquisitions: %lu", stats.failed_acquisitions);
-        ESP_LOGI(TAG, "Current resources in use: %lu", stats.resources_in_use);
-        
-        if (stats.total_requests > 0) {
-            float success_rate = (float)stats.successful_acquisitions / stats.total_requests * 100;
-            ESP_LOGI(TAG, "Success rate: %.1f%%", success_rate);
-        }
-        
-        // Resource utilization statistics
-        ESP_LOGI(TAG, "Resource utilization:");
-        uint32_t total_usage = 0;
-        for (int i = 0; i < MAX_RESOURCES; i++) {
-            total_usage += resources[i].usage_count;
-            ESP_LOGI(TAG, "  Resource %d: %lu uses, %lu total time", 
-                    i + 1, resources[i].usage_count, resources[i].total_usage_time);
-        }
-        ESP_LOGI(TAG, "Total resource usage events: %lu", total_usage);
-        ESP_LOGI(TAG, "════════════════════════════\n");
-    }
-}
+        // 4) เก็บ completion และตรวจ deadline
+        completion_t comp;
+        while (xQueueReceive(q_complete, &comp, 0) == pdTRUE) {
+            job_desc_t *jb = &g_jobs[comp.job_id];
+            jb->completions++;
 
-// Load generator task (creates bursts of requests)
-void load_generator_task(void *pvParameters) {
-    ESP_LOGI(TAG, "Load generator started");
-    
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(20000)); // Every 20 seconds
-        
-        ESP_LOGW(TAG, "🚀 LOAD GENERATOR: Creating burst of requests...");
-        
-        // Flash system LED during load burst
-        gpio_set_level(LED_SYSTEM, 1);
-        
-        // Create temporary high-demand scenario
-        for (int burst = 0; burst < 3; burst++) {
-            ESP_LOGI(TAG, "Load burst %d/3", burst + 1);
-            
-            // Try to acquire all resources quickly
-            for (int i = 0; i < MAX_RESOURCES + 2; i++) {
-                if (xSemaphoreTake(xCountingSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
-                    int res_idx = acquire_resource("LoadGen");
-                    if (res_idx >= 0) {
-                        ESP_LOGI(TAG, "LoadGen: Acquired resource %d", res_idx + 1);
-                        vTaskDelay(pdMS_TO_TICKS(500)); // Hold briefly
-                        release_resource(res_idx, 500);
-                        ESP_LOGI(TAG, "LoadGen: Released resource %d", res_idx + 1);
-                    }
-                    xSemaphoreGive(xCountingSemaphore);
-                } else {
-                    ESP_LOGW(TAG, "LoadGen: Resource pool exhausted");
-                }
-                vTaskDelay(pdMS_TO_TICKS(200));
+            bool miss = (comp.finish_us > comp.abs_deadline_us);
+            if (miss) {
+                jb->deadline_miss++;
+                // กระพริบ LED miss ให้เห็น
+                blink_once(LED_MISS, 10);
+                ESP_LOGW(TAG, "DEADLINE MISS job %s: finish=%" PRId64 " ddl=%" PRId64,
+                         jb->name, comp.finish_us, comp.abs_deadline_us);
             }
-            vTaskDelay(pdMS_TO_TICKS(1000));
+
+            // response time (finish - release)
+            uint32_t resp_ms = (uint32_t)((comp.finish_us - comp.release_us)/1000);
+            jb->sum_response_ms += resp_ms;
+            if (resp_ms > jb->max_response_ms) jb->max_response_ms = resp_ms;
         }
-        
-        gpio_set_level(LED_SYSTEM, 0);
-        ESP_LOGI(TAG, "Load burst completed\n");
+
+        vTaskDelay(pdMS_TO_TICKS(SCHED_TICK_MS));
     }
 }
 
-void app_main(void) {
-    ESP_LOGI(TAG, "Counting Semaphores Lab Starting...");
-    
-    // Configure LED pins
-    gpio_set_direction(LED_RESOURCE_1, GPIO_MODE_OUTPUT);
-    gpio_set_direction(LED_RESOURCE_2, GPIO_MODE_OUTPUT);
-    gpio_set_direction(LED_RESOURCE_3, GPIO_MODE_OUTPUT);
-    gpio_set_direction(LED_PRODUCER, GPIO_MODE_OUTPUT);
-    gpio_set_direction(LED_SYSTEM, GPIO_MODE_OUTPUT);
-    
-    // Turn off all LEDs
-    gpio_set_level(LED_RESOURCE_1, 0);
-    gpio_set_level(LED_RESOURCE_2, 0);
-    gpio_set_level(LED_RESOURCE_3, 0);
-    gpio_set_level(LED_PRODUCER, 0);
-    gpio_set_level(LED_SYSTEM, 0);
-    
-    // Create counting semaphore (initial count = max resources)
-    xCountingSemaphore = xSemaphoreCreateCounting(MAX_RESOURCES, MAX_RESOURCES);
-    
-    if (xCountingSemaphore != NULL) {
-        ESP_LOGI(TAG, "Counting semaphore created (max count: %d)", MAX_RESOURCES);
-        
-        // Producer task IDs (must be static for task parameters)
-        static int producer_ids[NUM_PRODUCERS] = {1, 2, 3, 4, 5};
-        
-        // Create producer tasks
-        for (int i = 0; i < NUM_PRODUCERS; i++) {
-            char task_name[20];
-            snprintf(task_name, sizeof(task_name), "Producer%d", i + 1);
-            xTaskCreate(producer_task, task_name, 3072, &producer_ids[i], 3, NULL);
+// ====== Monitor ======
+static void monitor_task(void *arg)
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        ESP_LOGI(TAG, "===== MONITOR =====");
+        for (int i=0;i<NUM_JOBS;i++){
+            job_desc_t *jb = &g_jobs[i];
+            float util = (float)jb->wcet_ms / (float)jb->period_ms * 100.0f;
+            float avg_resp = (jb->completions>0) ? (float)jb->sum_response_ms/(float)jb->completions : 0.0f;
+            ESP_LOGI(TAG, "Job %s (P%d): period=%ums wcet=%ums ddl=%ums | rel=%u comp=%u miss=%u | util=%.1f%% resp(avg=%.1f max=%u) ms",
+                     jb->name, jb->priority, jb->period_ms, jb->wcet_ms, jb->deadline_ms,
+                     jb->releases, jb->completions, jb->deadline_miss, util, avg_resp, jb->max_response_ms);
         }
-        
-        // Create monitoring tasks
-        xTaskCreate(resource_monitor_task, "ResMonitor", 3072, NULL, 2, NULL);
-        xTaskCreate(statistics_task, "Statistics", 3072, NULL, 1, NULL);
-        xTaskCreate(load_generator_task, "LoadGen", 2048, NULL, 4, NULL);
-        
-        ESP_LOGI(TAG, "System created with:");
-        ESP_LOGI(TAG, "  Resources: %d", MAX_RESOURCES);
-        ESP_LOGI(TAG, "  Producers: %d", NUM_PRODUCERS);
-        ESP_LOGI(TAG, "  Initial semaphore count: %d", MAX_RESOURCES);
-        ESP_LOGI(TAG, "\nSystem operational - monitoring resource pool usage!");
-        
-        // LED startup sequence
-        for (int cycle = 0; cycle < 2; cycle++) {
-            gpio_set_level(LED_RESOURCE_1, 1);
-            vTaskDelay(pdMS_TO_TICKS(150));
-            gpio_set_level(LED_RESOURCE_2, 1);
-            vTaskDelay(pdMS_TO_TICKS(150));
-            gpio_set_level(LED_RESOURCE_3, 1);
-            vTaskDelay(pdMS_TO_TICKS(150));
-            gpio_set_level(LED_PRODUCER, 1);
-            gpio_set_level(LED_SYSTEM, 1);
-            vTaskDelay(pdMS_TO_TICKS(300));
-            
-            // Turn off all
-            gpio_set_level(LED_RESOURCE_1, 0);
-            gpio_set_level(LED_RESOURCE_2, 0);
-            gpio_set_level(LED_RESOURCE_3, 0);
-            gpio_set_level(LED_PRODUCER, 0);
-            gpio_set_level(LED_SYSTEM, 0);
-            vTaskDelay(pdMS_TO_TICKS(200));
+        for (int w=0; w<NUM_WORKERS; w++){
+            ESP_LOGI(TAG, "Worker %d queue depth: %u", w, (unsigned)uxQueueMessagesWaiting(q_worker[w]));
         }
-        
-    } else {
-        ESP_LOGE(TAG, "Failed to create counting semaphore!");
+        ESP_LOGI(TAG, "====================");
     }
+}
+
+// ====== Optional: Load Generator (เพิ่มโหลด burst) ======
+static void load_gen_task(void *arg)
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(15000));
+        ESP_LOGW(TAG, "LOAD: temporary increase wcet for job B/C");
+        g_jobs[JOB_B].wcet_ms = 35;
+        g_jobs[JOB_C].wcet_ms = 90;
+        vTaskDelay(pdMS_TO_TICKS(6000));
+        ESP_LOGW(TAG, "LOAD: restore wcet");
+        g_jobs[JOB_B].wcet_ms = 20;
+        g_jobs[JOB_C].wcet_ms = 60;
+    }
+}
+
+// ====== app_main ======
+void app_main(void)
+{
+    ESP_LOGI(TAG, "Real-time Scheduler demo starting...");
+
+    // GPIO
+    gpio_set_direction(LED_OK, GPIO_MODE_OUTPUT);
+    gpio_set_direction(LED_MISS, GPIO_MODE_OUTPUT);
+    gpio_set_direction(LED_SCHED, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_OK, 0);
+    gpio_set_level(LED_MISS, 0);
+    gpio_set_level(LED_SCHED, 0);
+
+    // Queues
+    for (int i=0;i<NUM_WORKERS;i++){
+        q_worker[i] = xQueueCreate(WORKER_QUEUE_LEN, sizeof(worker_cmd_t));
+    }
+    q_complete = xQueueCreate(COMPLETE_QUEUE_LEN, sizeof(completion_t));
+
+    // Workers (pin core 0/1)
+    xTaskCreatePinnedToCore(worker_task, "worker0", WORKER_STACK, (void*)0, 4, &h_worker[0], 0);
+    xTaskCreatePinnedToCore(worker_task, "worker1", WORKER_STACK, (void*)1, 4, &h_worker[1], 1);
+
+    // Scheduler (prio สูงกว่า worker เล็กน้อย)
+    xTaskCreatePinnedToCore(scheduler_task, "scheduler", SCHED_STACK, NULL, 5, NULL, 0);
+
+    // Monitor
+    xTaskCreate(monitor_task, "monitor", MON_STACK, NULL, 3, NULL);
+
+    // Optional load gen
+    xTaskCreate(load_gen_task, "loadgen", LOAD_STACK, NULL, 2, NULL);
+
+    ESP_LOGI(TAG, "Setup complete.");
 }
