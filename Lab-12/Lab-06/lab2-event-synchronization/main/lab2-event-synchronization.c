@@ -1,8 +1,9 @@
+// =========================== lab2-event-synchronization.c ===========================
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <math.h>
 #include <stdbool.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -11,25 +12,68 @@
 #include "freertos/queue.h"
 
 #include "esp_log.h"
-#include "esp_random.h"
-#include "esp_timer.h"
+#include "esp_timer.h"    // <- esp_timer_get_time()
+#include "esp_random.h"   // <- esp_random()
 #include "driver/gpio.h"
-#include "esp_heap_caps.h"
+#include "esp_heap_caps.h"   // esp_get_free_heap_size()
 
 static const char *TAG = "EVENT_SYNC";
 
-/* ────────────────────────────────────────────────────────────────────────────
- * GPIO สำหรับแสดงสถานะ
- * ──────────────────────────────────────────────────────────────────────────── */
+/* ========================== Performance Tuning: config + helpers ========================== */
+// Priority (ปรับได้ตามโหลดจริง)
+#define BARRIER_WORKER_PRIORITY    6
+#define PIPELINE_STAGE_PRIORITY    7
+#define PIPE_GEN_PRIORITY          5
+#define WORKFLOW_MANAGER_PRIORITY  8
+#define APPROVAL_PRIORITY          7
+#define RESOURCE_MANAGER_PRIORITY  7
+#define WORKFLOW_GEN_PRIORITY      5
+#define STATS_MON_PRIORITY         3
+#define SYNC_MON_PRIORITY          3
+
+// Pin core: Core0 = system/workflow, Core1 = data/pipeline
+#define CORE_SYS   0
+#define CORE_DATA  1
+
+#ifndef portNUM_PROCESSORS
+#define portNUM_PROCESSORS 1
+#endif
+
+static inline BaseType_t create_task_auto_core(TaskFunction_t pxTaskCode,
+                                               const char * const pcName,
+                                               const uint32_t usStackDepth,
+                                               void * const pvParameters,
+                                               UBaseType_t uxPriority,
+                                               TaskHandle_t * const pxCreatedTask,
+                                               int core_id)
+{
+#if (portNUM_PROCESSORS > 1)
+    return xTaskCreatePinnedToCore(pxTaskCode, pcName, usStackDepth,
+                                   pvParameters, uxPriority, pxCreatedTask, core_id);
+#else
+    (void)core_id;
+    return xTaskCreate(pxTaskCode, pcName, usStackDepth,
+                       pvParameters, uxPriority, pxCreatedTask);
+#endif
+}
+
+// DEBUG/RELEASE logging (ลด overhead ตอน release)
+#ifndef NDEBUG
+  #define LOGD(tag, fmt, ...) ESP_LOGD(tag, fmt, ##__VA_ARGS__)
+#else
+  #define LOGD(tag, fmt, ...) do {} while(0)
+#endif
+/* ========================================================================================= */
+
+/* ================================ GPIO config (LEDs) ===================================== */
 #define LED_BARRIER_SYNC    GPIO_NUM_2   // Barrier synchronization indicator
 #define LED_PIPELINE_STAGE1 GPIO_NUM_4   // Pipeline stage 1
 #define LED_PIPELINE_STAGE2 GPIO_NUM_5   // Pipeline stage 2
 #define LED_PIPELINE_STAGE3 GPIO_NUM_18  // Pipeline stage 3
 #define LED_WORKFLOW_ACTIVE GPIO_NUM_19  // Workflow processing
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Event Groups
- * ──────────────────────────────────────────────────────────────────────────── */
+/* ================================ Event Groups =========================================== */
 EventGroupHandle_t barrier_events;
 EventGroupHandle_t pipeline_events;
 EventGroupHandle_t workflow_events;
@@ -56,10 +100,9 @@ EventGroupHandle_t workflow_events;
 #define RESOURCES_FREE_BIT  (1 << 2)
 #define QUALITY_OK_BIT      (1 << 3)
 #define WORKFLOW_DONE_BIT   (1 << 4)
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Data types
- * ──────────────────────────────────────────────────────────────────────────── */
+/* ================================== Data structures ====================================== */
 typedef struct {
     uint32_t worker_id;
     uint32_t cycle_number;
@@ -70,28 +113,26 @@ typedef struct {
 typedef struct {
     uint32_t pipeline_id;
     uint32_t stage;
-    float processing_data[4];
+    float    processing_data[4];
     uint32_t quality_score;
     uint64_t stage_timestamps[4];
 } pipeline_data_t;
 
 typedef struct {
     uint32_t workflow_id;
-    char description[32];
+    char     description[32];
     uint32_t priority;
     uint32_t estimated_duration;
-    bool requires_approval;
+    bool     requires_approval;
 } workflow_item_t;
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Queues
- * ──────────────────────────────────────────────────────────────────────────── */
+/* ===================================== Queues ============================================ */
 QueueHandle_t pipeline_queue;
 QueueHandle_t workflow_queue;
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Statistics
- * ──────────────────────────────────────────────────────────────────────────── */
+/* =================================== Statistics ========================================== */
 typedef struct {
     uint32_t barrier_cycles;
     uint32_t pipeline_completions;
@@ -102,17 +143,15 @@ typedef struct {
 } sync_stats_t;
 
 static sync_stats_t stats = {0};
+/* ========================================================================================= */
 
-/* ╔══════════════════════════════════════════════════════════════════════════╗
- * ║  Advanced Monitoring: Barrier Interval Analyzer (ฝังในไฟล์นี้ให้ครบ)   ║
- * ╚══════════════════════════════════════════════════════════════════════════╝ */
-#ifndef SYNC_TAG
-#define SYNC_TAG "SYNC_MON"
-#endif
 
-#define SYNC_MON_RING_SIZE      10
-#define SYNC_MON_REPORT_PERIOD  10000  // ms
+/* ================= Advanced Monitoring: Barrier Interval Analyzer ======================== */
+// ปรับแต่งได้
+#define SYNC_MON_RING_SIZE      10     // เก็บระยะเวลารอบล่าสุดกี่ค่า
+#define SYNC_MON_REPORT_PERIOD  10000  // รายงานผลทุกกี่ ms
 
+// Storage
 static SemaphoreHandle_t sSyncMonMutex = NULL;
 static uint32_t sIntervals[SYNC_MON_RING_SIZE] = {0};
 static uint32_t sCount = 0;
@@ -120,25 +159,22 @@ static uint32_t sWriteIdx = 0;
 static uint32_t sMinMs = 0;
 static uint32_t sMaxMs = 0;
 static uint32_t sAvgMs = 0;
+
+// สำหรับคำนวณ interval จาก “ครั้งก่อน”
 static uint32_t sLastBarrierTickMs = 0;
 
-static inline void ensure_sync_mon_mutex(void) {
-    if (sSyncMonMutex == NULL) {
-        sSyncMonMutex = xSemaphoreCreateMutex();
-    }
-}
-
+// ให้ worker เรียกเมื่อ “ผ่าน barrier 1 รอบ”
 void monitor_on_barrier_pass(void)
 {
     uint32_t nowMs = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    if (sLastBarrierTickMs == 0) {
+
+    if (sLastBarrierTickMs == 0) { // รอบแรก ไม่มีค่า last
         sLastBarrierTickMs = nowMs;
         return;
     }
     uint32_t interval = nowMs - sLastBarrierTickMs;
     sLastBarrierTickMs = nowMs;
 
-    ensure_sync_mon_mutex();
     if (sSyncMonMutex) {
         xSemaphoreTake(sSyncMonMutex, portMAX_DELAY);
 
@@ -149,7 +185,7 @@ void monitor_on_barrier_pass(void)
         if (sMinMs == 0 || interval < sMinMs) sMinMs = interval;
         if (interval > sMaxMs) sMaxMs = interval;
         if (sAvgMs == 0) sAvgMs = interval;
-        else             sAvgMs = (sAvgMs + interval) / 2;
+        else            sAvgMs = (sAvgMs + interval) / 2; // running average ง่าย ๆ
 
         xSemaphoreGive(sSyncMonMutex);
     }
@@ -158,7 +194,7 @@ void monitor_on_barrier_pass(void)
 static void sync_pattern_monitor_task(void *arg)
 {
     (void)arg;
-    ESP_LOGI(SYNC_TAG, "📊 SyncPatternMonitor started (report every %d ms)", SYNC_MON_REPORT_PERIOD);
+    ESP_LOGI(TAG, "📊 SyncPatternMonitor started (report every %d ms)", SYNC_MON_REPORT_PERIOD);
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(SYNC_MON_REPORT_PERIOD));
@@ -166,135 +202,118 @@ static void sync_pattern_monitor_task(void *arg)
         uint32_t localBuf[SYNC_MON_RING_SIZE] = {0};
         uint32_t n = 0, minv = 0, maxv = 0, avgv = 0;
 
-        ensure_sync_mon_mutex();
         if (sSyncMonMutex) {
             xSemaphoreTake(sSyncMonMutex, portMAX_DELAY);
-
-            n    = sCount;
-            minv = sMinMs;
-            maxv = sMaxMs;
-            avgv = sAvgMs;
+            n = sCount; minv = sMinMs; maxv = sMaxMs; avgv = sAvgMs;
 
             for (uint32_t i = 0; i < n; i++) {
                 uint32_t idx = (sWriteIdx + SYNC_MON_RING_SIZE - 1 - i) % SYNC_MON_RING_SIZE;
                 localBuf[i] = sIntervals[idx];
             }
-
             xSemaphoreGive(sSyncMonMutex);
         }
 
-        ESP_LOGI(SYNC_TAG, "📈 Barrier intervals (latest %u):", (unsigned)n);
+        ESP_LOGI(TAG, "📈 Barrier intervals (latest %u):", (unsigned)n);
         if (n == 0) {
-            ESP_LOGI(SYNC_TAG, "  (no data yet)");
+            ESP_LOGI(TAG, "  (no data yet)");
             continue;
         }
-
         for (uint32_t i = 0; i < n; i++) {
-            ESP_LOGI(SYNC_TAG, "  #%02u: %u ms", (unsigned)i + 1, (unsigned)localBuf[i]);
+            ESP_LOGI(TAG, "  #%02u: %u ms", (unsigned)i + 1, (unsigned)localBuf[i]);
         }
-        ESP_LOGI(SYNC_TAG, "  min=%u ms  max=%u ms  avg~=%u ms",
+        ESP_LOGI(TAG, "  min=%u ms  max=%u ms  avg~=%u ms",
                  (unsigned)minv, (unsigned)maxv, (unsigned)avgv);
     }
 }
 
 void monitor_init(void)
 {
-    ensure_sync_mon_mutex();
-    xTaskCreate(sync_pattern_monitor_task, "SyncPatternMon", 3072, NULL, 3, NULL);
+    if (!sSyncMonMutex) sSyncMonMutex = xSemaphoreCreateMutex();
+    create_task_auto_core(sync_pattern_monitor_task, "SyncPatternMon", 3072, NULL,
+                          SYNC_MON_PRIORITY, NULL, CORE_SYS);
 }
 
 void analyze_synchronization_patterns(void)
 {
-    ensure_sync_mon_mutex();
     if (!sSyncMonMutex) return;
-
     xSemaphoreTake(sSyncMonMutex, portMAX_DELAY);
     uint32_t n = sCount, minv = sMinMs, maxv = sMaxMs, avgv = sAvgMs;
     xSemaphoreGive(sSyncMonMutex);
 
     if (n > 0) {
-        ESP_LOGI(SYNC_TAG, "📊 Barrier interval (rolling): min=%u ms  max=%u ms  avg~=%u ms",
+        ESP_LOGI(TAG, "📊 Barrier interval (rolling): min=%u ms max=%u ms avg~=%u ms",
                  (unsigned)minv, (unsigned)maxv, (unsigned)avgv);
     }
 }
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Barrier Synchronization Tasks
- * ──────────────────────────────────────────────────────────────────────────── */
-void barrier_worker_task(void *pvParameters) {
+
+/* =============================== Barrier Worker (TUNED) ================================== */
+void barrier_worker_task(void *pvParameters)
+{
     uint32_t worker_id = (uint32_t)pvParameters;
     EventBits_t my_ready_bit = (1 << worker_id);
     uint32_t cycle = 0;
 
-    ESP_LOGI(TAG, "🏃 Barrier Worker %lu started", worker_id);
+    ESP_LOGI(TAG, "🏃 [TUNED] Barrier Worker %lu started", worker_id);
 
     while (1) {
         cycle++;
 
-        // Phase 1: Independent work
-        uint32_t work_duration = 1000 + (esp_random() % 3000); // 1-4 seconds
-        ESP_LOGI(TAG, "👷 Worker %lu: Cycle %lu - Independent work (%lu ms)",
-                 worker_id, cycle, work_duration);
-
+        // Phase 1: independent work — ลด jitter โดยแคบช่วงสุ่ม
+        uint32_t work_duration = 1200 + (esp_random() % 1400); // 1.2–2.6s
+        LOGD(TAG, "👷 Worker %lu: Cycle %lu - Independent work (%lums)",
+             worker_id, cycle, work_duration);
         vTaskDelay(pdMS_TO_TICKS(work_duration));
 
-        // Phase 2: Signal ready for barrier
-        uint64_t barrier_start = esp_timer_get_time();
+        // Phase 2+3: ใช้ xEventGroupSync (set + wait)
+        uint64_t t0 = esp_timer_get_time();
         ESP_LOGI(TAG, "🚧 Worker %lu: Ready for barrier (cycle %lu)", worker_id, cycle);
-        xEventGroupSetBits(barrier_events, my_ready_bit);
 
-        // Phase 3: Wait at barrier for all workers
-        EventBits_t bits = xEventGroupWaitBits(
-            barrier_events,
-            ALL_WORKERS_READY,
-            pdTRUE,     // Clear bits after wait
-            pdTRUE,     // Wait for ALL bits
-            pdMS_TO_TICKS(10000) // 10 second timeout
+        EventBits_t bits = xEventGroupSync(
+            barrier_events,     // group
+            my_ready_bit,       // set บิตของตัวเอง
+            ALL_WORKERS_READY,  // รอให้ครบทุกบิต
+            pdMS_TO_TICKS(10000)
         );
 
-        uint64_t barrier_end = esp_timer_get_time();
-        uint32_t barrier_time = (barrier_end - barrier_start) / 1000; // ms
+        uint32_t waited_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
 
         if ((bits & ALL_WORKERS_READY) == ALL_WORKERS_READY) {
-            ESP_LOGI(TAG, "🎯 Worker %lu: Barrier passed! (waited %lu ms)",
-                     worker_id, barrier_time);
+            ESP_LOGI(TAG, "🎯 Worker %lu: Barrier passed! (waited %lu ms)", worker_id, waited_ms);
 
-            // Update statistics
-            if (barrier_time > stats.synchronization_time_max) {
-                stats.synchronization_time_max = barrier_time;
-            }
-            stats.synchronization_time_avg =
-                (stats.synchronization_time_avg + barrier_time) / 2;
-
-            // นับรอบ barrier และกระพริบไฟ แถมยิง monitoring 1 ครั้งต่อรอบ
+            // นับสถิติ/แสดง LED เฉพาะครั้งเดียวต่อรอบ
             if (worker_id == 0) {
+                if (waited_ms > stats.synchronization_time_max) {
+                    stats.synchronization_time_max = waited_ms;
+                }
+                stats.synchronization_time_avg =
+                    (stats.synchronization_time_avg + waited_ms) / 2;
+
                 stats.barrier_cycles++;
                 gpio_set_level(LED_BARRIER_SYNC, 1);
                 vTaskDelay(pdMS_TO_TICKS(200));
                 gpio_set_level(LED_BARRIER_SYNC, 0);
 
-                // 🔎 Monitor: เก็บช่วงห่างของ barrier + log rolling summary
                 monitor_on_barrier_pass();
                 analyze_synchronization_patterns();
             }
 
-            // Phase 4: Synchronized work
-            ESP_LOGI(TAG, "🤝 Worker %lu: Synchronized work phase", worker_id);
-            vTaskDelay(pdMS_TO_TICKS(500 + (esp_random() % 500)));
-
+            // Phase 4: synchronized work
+            vTaskDelay(pdMS_TO_TICKS(400 + (esp_random() % 400))); // 0.4–0.8s
         } else {
-            ESP_LOGW(TAG, "⏰ Worker %lu: Barrier timeout!", worker_id);
+            ESP_LOGW(TAG, "⏰ Worker %lu: Barrier timeout after %lu ms", worker_id, waited_ms);
         }
 
-        // Cool down period
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(1200)); // cool-down
     }
 }
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Pipeline Processing Tasks
- * ──────────────────────────────────────────────────────────────────────────── */
-void pipeline_stage_task(void *pvParameters) {
+
+/* =============================== Pipeline Processing ===================================== */
+void pipeline_stage_task(void *pvParameters)
+{
     uint32_t stage_id = (uint32_t)pvParameters;
     EventBits_t stage_complete_bit = (1 << stage_id);
     EventBits_t prev_stage_bit = (stage_id > 0) ? (1 << (stage_id - 1)) : DATA_AVAILABLE_BIT;
@@ -306,13 +325,12 @@ void pipeline_stage_task(void *pvParameters) {
     ESP_LOGI(TAG, "🏭 Pipeline Stage %lu (%s) started", stage_id, stage_names[stage_id]);
 
     while (1) {
-        // Wait for previous stage or data
         ESP_LOGI(TAG, "⏳ Stage %lu: Waiting for input...", stage_id);
         EventBits_t bits = xEventGroupWaitBits(
             pipeline_events,
             prev_stage_bit,
-            pdTRUE,     // Clear bit after receiving
-            pdTRUE,     // Wait for the specific bit
+            pdTRUE,     // clear bit หลังรับ
+            pdTRUE,
             portMAX_DELAY
         );
 
@@ -321,16 +339,13 @@ void pipeline_stage_task(void *pvParameters) {
 
             pipeline_data_t pipeline_data;
 
-            // Get data from queue if available
             if (xQueueReceive(pipeline_queue, &pipeline_data, pdMS_TO_TICKS(100)) == pdTRUE) {
                 ESP_LOGI(TAG, "📦 Stage %lu: Processing pipeline ID %lu",
                          stage_id, pipeline_data.pipeline_id);
 
-                // Record processing start time
                 pipeline_data.stage_timestamps[stage_id] = esp_timer_get_time();
                 pipeline_data.stage = stage_id;
 
-                // Simulate stage-specific processing
                 uint32_t processing_time = 500 + (esp_random() % 1000);
 
                 switch (stage_id) {
@@ -345,41 +360,36 @@ void pipeline_stage_task(void *pvParameters) {
                     case 1: // Processing stage
                         ESP_LOGI(TAG, "⚙️ Stage %lu: Data processing and transformation", stage_id);
                         for (int i = 0; i < 4; i++) {
-                            pipeline_data.processing_data[i] *= 1.1; // Apply processing
+                            pipeline_data.processing_data[i] *= 1.1f;
                         }
                         pipeline_data.quality_score += (esp_random() % 20) - 10; // ±10
                         break;
 
-                    case 2: // Filtering stage
+                    case 2: { // Filtering stage
                         ESP_LOGI(TAG, "🔍 Stage %lu: Data filtering and validation", stage_id);
-                        {
-                            float avg = 0;
-                            for (int i = 0; i < 4; i++) avg += pipeline_data.processing_data[i];
-                            avg /= 4.0;
-                            ESP_LOGI(TAG, "Average value: %.2f, Quality: %lu",
-                                     avg, pipeline_data.quality_score);
-                        }
+                        float avg = 0;
+                        for (int i = 0; i < 4; i++) avg += pipeline_data.processing_data[i];
+                        avg /= 4.0f;
+                        ESP_LOGI(TAG, "Average value: %.2f, Quality: %lu",
+                                 avg, pipeline_data.quality_score);
                         break;
+                    }
 
-                    case 3: // Output stage
+                    case 3: { // Output stage
                         ESP_LOGI(TAG, "📤 Stage %lu: Data output and delivery", stage_id);
                         stats.pipeline_completions++;
-
-                        {
-                            uint64_t total_time = esp_timer_get_time() -
-                                                  pipeline_data.stage_timestamps[0];
-                            stats.total_processing_time += total_time;
-
-                            ESP_LOGI(TAG, "✅ Pipeline %lu completed in %llu ms (Quality: %lu)",
-                                     pipeline_data.pipeline_id, total_time / 1000,
-                                     pipeline_data.quality_score);
-                        }
+                        uint64_t total_time = esp_timer_get_time() -
+                                              pipeline_data.stage_timestamps[0];
+                        stats.total_processing_time += total_time;
+                        ESP_LOGI(TAG, "✅ Pipeline %lu completed in %llu ms (Quality: %lu)",
+                                 pipeline_data.pipeline_id, total_time / 1000,
+                                 pipeline_data.quality_score);
                         break;
+                    }
                 }
 
                 vTaskDelay(pdMS_TO_TICKS(processing_time));
 
-                // Pass data to next stage
                 if (stage_id < 3) {
                     if (xQueueSend(pipeline_queue, &pipeline_data, pdMS_TO_TICKS(100)) == pdTRUE) {
                         xEventGroupSetBits(pipeline_events, stage_complete_bit);
@@ -388,7 +398,6 @@ void pipeline_stage_task(void *pvParameters) {
                         ESP_LOGW(TAG, "⚠️ Stage %lu: Queue full, data lost", stage_id);
                     }
                 }
-
             } else {
                 ESP_LOGW(TAG, "⚠️ Stage %lu: No data in queue", stage_id);
             }
@@ -396,20 +405,20 @@ void pipeline_stage_task(void *pvParameters) {
             gpio_set_level(stage_leds[stage_id], 0);
         }
 
-        // Check for pipeline reset
+        // Reset pipeline หากมีสั่ง
         EventBits_t reset_bits = xEventGroupGetBits(pipeline_events);
         if (reset_bits & PIPELINE_RESET_BIT) {
             ESP_LOGI(TAG, "🔄 Stage %lu: Pipeline reset detected", stage_id);
             xEventGroupClearBits(pipeline_events, PIPELINE_RESET_BIT);
-            // Clear any remaining data
             pipeline_data_t dummy;
-            while (xQueueReceive(pipeline_queue, &dummy, 0) == pdTRUE) {}
+            while (xQueueReceive(pipeline_queue, &dummy, 0) == pdTRUE) { /* drain */ }
         }
     }
 }
 
-/* Pipeline data generator */
-void pipeline_data_generator_task(void *pvParameters) {
+void pipeline_data_generator_task(void *pvParameters)
+{
+    (void)pvParameters;
     uint32_t pipeline_id = 0;
 
     ESP_LOGI(TAG, "🏭 Pipeline data generator started");
@@ -429,77 +438,62 @@ void pipeline_data_generator_task(void *pvParameters) {
             ESP_LOGW(TAG, "⚠️ Pipeline queue full, data %lu dropped", pipeline_id);
         }
 
-        // Generate data at random intervals
-        uint32_t interval = 3000 + (esp_random() % 4000); // 3-7 seconds
+        uint32_t interval = 3000 + (esp_random() % 4000); // 3–7s
         vTaskDelay(pdMS_TO_TICKS(interval));
     }
 }
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * Workflow Management Tasks
- * ──────────────────────────────────────────────────────────────────────────── */
-void workflow_manager_task(void *pvParameters) {
+
+/* =============================== Workflow Management ===================================== */
+void workflow_manager_task(void *pvParameters)
+{
+    (void)pvParameters;
     ESP_LOGI(TAG, "📋 Workflow manager started");
 
     while (1) {
         workflow_item_t workflow;
 
-        // Wait for workflow requests
         if (xQueueReceive(workflow_queue, &workflow, portMAX_DELAY) == pdTRUE) {
             ESP_LOGI(TAG, "📝 New workflow: ID %lu - %s (Priority: %lu)",
                      workflow.workflow_id, workflow.description, workflow.priority);
 
-            // Set workflow start event
             xEventGroupSetBits(workflow_events, WORKFLOW_START_BIT);
             gpio_set_level(LED_WORKFLOW_ACTIVE, 1);
 
-            // Check workflow requirements
             EventBits_t required_events = RESOURCES_FREE_BIT;
-
             if (workflow.requires_approval) {
                 required_events |= APPROVAL_READY_BIT;
                 ESP_LOGI(TAG, "📋 Workflow %lu requires approval", workflow.workflow_id);
             }
 
-            // Wait for requirements
             ESP_LOGI(TAG, "⏳ Waiting for workflow requirements (0x%08X)...", required_events);
             EventBits_t bits = xEventGroupWaitBits(
-                workflow_events,
-                required_events,
-                pdFALSE,    // Don't clear bits
-                pdTRUE,     // Wait for ALL required bits
-                pdMS_TO_TICKS(workflow.estimated_duration * 2) // Dynamic timeout
+                workflow_events, required_events, pdFALSE, pdTRUE,
+                pdMS_TO_TICKS(workflow.estimated_duration * 2)
             );
 
             if ((bits & required_events) == required_events) {
                 ESP_LOGI(TAG, "✅ Workflow %lu: Requirements met, starting execution",
                          workflow.workflow_id);
 
-                // Execute workflow
                 uint32_t execution_time = workflow.estimated_duration +
-                                          (esp_random() % 1000); // Add some randomness
-
-                ESP_LOGI(TAG, "⚙️ Executing workflow %lu (%lu ms estimated)",
+                                          (esp_random() % 1000);
+                ESP_LOGI(TAG, "⚙️ Executing workflow %lu (~%lu ms)",
                          workflow.workflow_id, execution_time);
 
                 vTaskDelay(pdMS_TO_TICKS(execution_time));
 
-                // Simulate quality check
-                uint32_t quality = 60 + (esp_random() % 40); // 60-100%
-
+                uint32_t quality = 60 + (esp_random() % 40); // 60–100%
                 if (quality > 80) {
                     xEventGroupSetBits(workflow_events, QUALITY_OK_BIT);
                     ESP_LOGI(TAG, "✅ Workflow %lu completed successfully (Quality: %lu%%)",
                              workflow.workflow_id, quality);
-
                     xEventGroupSetBits(workflow_events, WORKFLOW_DONE_BIT);
                     stats.workflow_completions++;
-
                 } else {
                     ESP_LOGW(TAG, "⚠️ Workflow %lu quality check failed (%lu%%), retrying...",
                              workflow.workflow_id, quality);
-
-                    // Re-queue for retry
                     if (xQueueSend(workflow_queue, &workflow, 0) != pdTRUE) {
                         ESP_LOGE(TAG, "❌ Failed to re-queue workflow %lu", workflow.workflow_id);
                     }
@@ -511,32 +505,27 @@ void workflow_manager_task(void *pvParameters) {
             }
 
             gpio_set_level(LED_WORKFLOW_ACTIVE, 0);
-
-            // Clear workflow events for next iteration
             xEventGroupClearBits(workflow_events,
                                  WORKFLOW_START_BIT | WORKFLOW_DONE_BIT | QUALITY_OK_BIT);
         }
     }
 }
 
-/* Approval task (simulates approval process) */
-void approval_task(void *pvParameters) {
+void approval_task(void *pvParameters)
+{
+    (void)pvParameters;
     ESP_LOGI(TAG, "👨‍💼 Approval task started");
 
     while (1) {
-        // Wait for workflow start
         xEventGroupWaitBits(workflow_events, WORKFLOW_START_BIT,
                             pdFALSE, pdTRUE, portMAX_DELAY);
 
         ESP_LOGI(TAG, "📋 Approval process initiated...");
 
-        // Simulate approval time
-        uint32_t approval_time = 1000 + (esp_random() % 2000); // 1-3 seconds
+        uint32_t approval_time = 1000 + (esp_random() % 2000); // 1–3s
         vTaskDelay(pdMS_TO_TICKS(approval_time));
 
-        // Random approval decision
-        bool approved = (esp_random() % 100) > 20; // 80% approval rate
-
+        bool approved = (esp_random() % 100) > 20; // 80% ผ่าน
         if (approved) {
             ESP_LOGI(TAG, "✅ Approval granted (took %lu ms)", approval_time);
             xEventGroupSetBits(workflow_events, APPROVAL_READY_BIT);
@@ -545,14 +534,14 @@ void approval_task(void *pvParameters) {
             xEventGroupClearBits(workflow_events, APPROVAL_READY_BIT);
         }
 
-        // Keep approval valid for a while
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(5000)); // เก็บสถานะไว้สักพัก
         xEventGroupClearBits(workflow_events, APPROVAL_READY_BIT);
     }
 }
 
-/* Resource manager task */
-void resource_manager_task(void *pvParameters) {
+void resource_manager_task(void *pvParameters)
+{
+    (void)pvParameters;
     ESP_LOGI(TAG, "🏗️ Resource manager started");
 
     bool resources_available = true;
@@ -561,33 +550,27 @@ void resource_manager_task(void *pvParameters) {
         if (resources_available) {
             xEventGroupSetBits(workflow_events, RESOURCES_FREE_BIT);
             ESP_LOGI(TAG, "🟢 Resources available");
-
-            // Simulate resource usage
-            uint32_t usage_time = 2000 + (esp_random() % 8000); // 2-10 seconds
+            uint32_t usage_time = 2000 + (esp_random() % 8000); // 2–10s
             vTaskDelay(pdMS_TO_TICKS(usage_time));
 
-            // Randomly make resources unavailable
-            if ((esp_random() % 100) > 70) { // 30% chance
+            if ((esp_random() % 100) > 70) { // 30% ปิดชั่วคราว
                 resources_available = false;
                 xEventGroupClearBits(workflow_events, RESOURCES_FREE_BIT);
                 ESP_LOGI(TAG, "🔴 Resources temporarily unavailable");
             }
-
         } else {
             ESP_LOGI(TAG, "⏳ Waiting for resources to become available...");
-
-            // Simulate resource recovery time
-            uint32_t recovery_time = 3000 + (esp_random() % 5000); // 3-8 seconds
-            vTaskDelay(pdMS_TO_TICKS(recovery_time));
-
+            uint32_t recovery = 3000 + (esp_random() % 5000); // 3–8s
+            vTaskDelay(pdMS_TO_TICKS(recovery));
             resources_available = true;
             ESP_LOGI(TAG, "🟢 Resources recovered and available");
         }
     }
 }
 
-/* Workflow generator task */
-void workflow_generator_task(void *pvParameters) {
+void workflow_generator_task(void *pvParameters)
+{
+    (void)pvParameters;
     uint32_t workflow_counter = 0;
 
     ESP_LOGI(TAG, "📋 Workflow generator started");
@@ -595,16 +578,14 @@ void workflow_generator_task(void *pvParameters) {
     while (1) {
         workflow_item_t workflow = {0};
         workflow.workflow_id = ++workflow_counter;
-        workflow.priority = 1 + (esp_random() % 5); // Priority 1-5
-        workflow.estimated_duration = 2000 + (esp_random() % 4000); // 2-6 seconds
-        workflow.requires_approval = (esp_random() % 100) > 60; // 40% need approval
+        workflow.priority = 1 + (esp_random() % 5);              // 1–5
+        workflow.estimated_duration = 2000 + (esp_random() % 4000); // 2–6s
+        workflow.requires_approval = (esp_random() % 100) > 60;  // 40% ต้อง approval
 
-        // Generate workflow description
         const char* workflow_types[] = {
             "Data Processing", "Report Generation", "System Backup",
             "Quality Analysis", "Performance Test", "Security Scan"
         };
-
         strcpy(workflow.description, workflow_types[esp_random() % 6]);
 
         ESP_LOGI(TAG, "🚀 Generated workflow: %s (ID: %lu, Priority: %lu, Approval: %s)",
@@ -615,18 +596,21 @@ void workflow_generator_task(void *pvParameters) {
             ESP_LOGW(TAG, "⚠️ Workflow queue full, dropping workflow %lu", workflow.workflow_id);
         }
 
-        // Generate workflows at random intervals
-        uint32_t interval = 4000 + (esp_random() % 6000); // 4-10 seconds
+        uint32_t interval = 4000 + (esp_random() % 6000); // 4–10s
         vTaskDelay(pdMS_TO_TICKS(interval));
     }
 }
+/* ========================================================================================= */
 
-/* Statistics and monitoring task */
-void statistics_monitor_task(void *pvParameters) {
+
+/* =========================== Statistics & Monitoring task ================================ */
+void statistics_monitor_task(void *pvParameters)
+{
+    (void)pvParameters;
     ESP_LOGI(TAG, "📊 Statistics monitor started");
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(15000)); // Report every 15 seconds
+        vTaskDelay(pdMS_TO_TICKS(15000)); // รายงานทุก 15 วิ
 
         ESP_LOGI(TAG, "\n📈 ═══ SYNCHRONIZATION STATISTICS ═══");
         ESP_LOGI(TAG, "Barrier cycles:        %lu", stats.barrier_cycles);
@@ -645,18 +629,18 @@ void statistics_monitor_task(void *pvParameters) {
         ESP_LOGI(TAG, "System uptime:         %llu ms", esp_timer_get_time() / 1000);
         ESP_LOGI(TAG, "═══════════════════════════════════════\n");
 
-        // Event group status
         ESP_LOGI(TAG, "📊 Event Group Status:");
         ESP_LOGI(TAG, "  Barrier events:   0x%08X", xEventGroupGetBits(barrier_events));
         ESP_LOGI(TAG, "  Pipeline events:  0x%08X", xEventGroupGetBits(pipeline_events));
         ESP_LOGI(TAG, "  Workflow events:  0x%08X", xEventGroupGetBits(workflow_events));
     }
 }
+/* ========================================================================================= */
 
-/* ────────────────────────────────────────────────────────────────────────────
- * app_main
- * ──────────────────────────────────────────────────────────────────────────── */
-void app_main(void) {
+
+/* ========================================= app_main ====================================== */
+void app_main(void)
+{
     ESP_LOGI(TAG, "🚀 Event Synchronization Lab Starting...");
 
     // Configure GPIO
@@ -666,7 +650,7 @@ void app_main(void) {
     gpio_set_direction(LED_PIPELINE_STAGE3, GPIO_MODE_OUTPUT);
     gpio_set_direction(LED_WORKFLOW_ACTIVE, GPIO_MODE_OUTPUT);
 
-    // Initialize all LEDs off
+    // Initialize LEDs off
     gpio_set_level(LED_BARRIER_SYNC, 0);
     gpio_set_level(LED_PIPELINE_STAGE1, 0);
     gpio_set_level(LED_PIPELINE_STAGE2, 0);
@@ -674,7 +658,7 @@ void app_main(void) {
     gpio_set_level(LED_WORKFLOW_ACTIVE, 0);
 
     // Create Event Groups
-    barrier_events = xEventGroupCreate();
+    barrier_events  = xEventGroupCreate();
     pipeline_events = xEventGroupCreate();
     workflow_events = xEventGroupCreate();
 
@@ -686,44 +670,49 @@ void app_main(void) {
     // Create Queues
     pipeline_queue = xQueueCreate(5, sizeof(pipeline_data_t));
     workflow_queue = xQueueCreate(8, sizeof(workflow_item_t));
-
     if (!pipeline_queue || !workflow_queue) {
         ESP_LOGE(TAG, "Failed to create queues!");
         return;
     }
-
     ESP_LOGI(TAG, "Event groups and queues created successfully");
 
-    // 🟢 Start Advanced Monitoring
+    // Start monitors
     monitor_init();
 
-    // Create Barrier Synchronization Tasks
-    ESP_LOGI(TAG, "Creating barrier synchronization tasks...");
+    // Barrier Sync Tasks (tuned, pinned)
+    ESP_LOGI(TAG, "Creating barrier synchronization tasks (tuned, pinned)...");
     for (int i = 0; i < 4; i++) {
         char task_name[16];
         sprintf(task_name, "BarrierWork%d", i);
-        xTaskCreate(barrier_worker_task, task_name, 2048, (void*)i, 5, NULL);
+        create_task_auto_core(barrier_worker_task, task_name, 2048, (void*)i,
+                              BARRIER_WORKER_PRIORITY, NULL, CORE_DATA);
     }
 
-    // Create Pipeline Processing Tasks
-    ESP_LOGI(TAG, "Creating pipeline processing tasks...");
+    // Pipeline Processing Tasks (tuned, pinned)
+    ESP_LOGI(TAG, "Creating pipeline processing tasks (tuned, pinned)...");
     for (int i = 0; i < 4; i++) {
         char task_name[16];
         sprintf(task_name, "PipeStage%d", i);
-        xTaskCreate(pipeline_stage_task, task_name, 3072, (void*)i, 6, NULL);
+        create_task_auto_core(pipeline_stage_task, task_name, 3072, (void*)i,
+                              PIPELINE_STAGE_PRIORITY, NULL, CORE_DATA);
     }
+    create_task_auto_core(pipeline_data_generator_task, "PipeGen", 2048, NULL,
+                          PIPE_GEN_PRIORITY, NULL, CORE_DATA);
 
-    xTaskCreate(pipeline_data_generator_task, "PipeGen", 2048, NULL, 4, NULL);
+    // Workflow Management Tasks (tuned, pinned)
+    ESP_LOGI(TAG, "Creating workflow management tasks (tuned, pinned)...");
+    create_task_auto_core(workflow_manager_task,  "WorkflowMgr", 3072, NULL,
+                          WORKFLOW_MANAGER_PRIORITY, NULL, CORE_SYS);
+    create_task_auto_core(approval_task,          "Approval",    2048, NULL,
+                          APPROVAL_PRIORITY, NULL, CORE_SYS);
+    create_task_auto_core(resource_manager_task,  "ResourceMgr", 2048, NULL,
+                          RESOURCE_MANAGER_PRIORITY, NULL, CORE_SYS);
+    create_task_auto_core(workflow_generator_task,"WorkflowGen", 2048, NULL,
+                          WORKFLOW_GEN_PRIORITY, NULL, CORE_SYS);
 
-    // Create Workflow Management Tasks
-    ESP_LOGI(TAG, "Creating workflow management tasks...");
-    xTaskCreate(workflow_manager_task, "WorkflowMgr", 3072, NULL, 7, NULL);
-    xTaskCreate(approval_task, "Approval", 2048, NULL, 6, NULL);
-    xTaskCreate(resource_manager_task, "ResourceMgr", 2048, NULL, 6, NULL);
-    xTaskCreate(workflow_generator_task, "WorkflowGen", 2048, NULL, 4, NULL);
-
-    // Create monitoring task
-    xTaskCreate(statistics_monitor_task, "StatsMon", 3072, NULL, 3, NULL);
+    // Statistics monitor
+    create_task_auto_core(statistics_monitor_task,"StatsMon", 3072, NULL,
+                          STATS_MON_PRIORITY, NULL, CORE_SYS);
 
     ESP_LOGI(TAG, "All tasks created successfully");
     ESP_LOGI(TAG, "\n🎯 LED Indicators:");
@@ -734,10 +723,11 @@ void app_main(void) {
     ESP_LOGI(TAG, "  GPIO19 - Workflow Active");
 
     ESP_LOGI(TAG, "\n🔄 System Features:");
-    ESP_LOGI(TAG, "  • Barrier Synchronization (4 workers)");
+    ESP_LOGI(TAG, "  • Barrier Synchronization (xEventGroupSync, 4 workers)");
     ESP_LOGI(TAG, "  • Pipeline Processing (4 stages)");
     ESP_LOGI(TAG, "  • Workflow Management (approval & resources)");
-    ESP_LOGI(TAG, "  • Real-time Statistics Monitoring");
+    ESP_LOGI(TAG, "  • Advanced Monitoring + Real-time Statistics");
 
     ESP_LOGI(TAG, "Event Synchronization System operational!");
 }
+// ===========================================================================================
