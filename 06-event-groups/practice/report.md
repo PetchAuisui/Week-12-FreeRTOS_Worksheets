@@ -26,3 +26,26 @@
 
 - การ Debug Event States:
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/dfb2d6ee-b868-4d55-9994-c5fccfb3c743" />
+
+
+## Lab 2: Event Synchronization
+### result
+<img width="1918" height="1079" alt="image" src="https://github.com/user-attachments/assets/44c34df9-5b43-4874-9ff1-f6be6852d0fa" />
+
+### 📊 การวิเคราะห์ Synchronization Patterns
+- เพิ่ม Advanced Monitoring:
+<img width="1919" height="1075" alt="image" src="https://github.com/user-attachments/assets/67307bc7-a945-4a91-83c2-ae4ca815cf00" />
+
+- Performance Tuning:
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/5a2e6e01-a360-431d-bae2-81eee97774f8" />
+
+### 🚀 ความท้าทายเพิ่มเติม
+1. **Dynamic Barrier Size**: เปลี่ยนจำนวน workers แบบ runtime
+
+2. **Priority-based Pipeline**: จัดลำดับ pipeline ตาม priority
+
+3. **Fault-tolerant Synchronization**: จัดการ task failures
+
+4. **Load-balanced Processing**: กระจายโหลดแบบ dynamic
+
+5. **Cross-group Synchronization**: synchronization ระหว่าง event groups
