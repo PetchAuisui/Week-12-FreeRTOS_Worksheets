@@ -93,7 +93,5 @@
 
 ## Lab 3: Counting Semaphores
 ### result
-- ทดลองที่ 1
-<img width="1918" height="1078" alt="image" src="https://github.com/user-attachments/assets/c07184f7-85da-48ee-88fe-d62ddab72558" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/02f3c64e-3c70-421a-abee-45734b501a4e" />
 
-- ทดลองที่ 2
