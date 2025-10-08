@@ -95,3 +95,42 @@
 ### result
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/02f3c64e-3c70-421a-abee-45734b501a4e" />
 
+### 📋 Advanced Analysis Questions
+1. Service Task Priority: ผลกระทบของ Priority ต่อ Timer Accuracy?
+- High Priority = High Accuracy: เมื่อ Timer Service Task มี priority สูงกว่า tasks ทั่วไป callback จะถูกรันใกล้เวลาที่ตั้งไว้ delay (jitter) จะต่ำกว่า 1–2 tick เท่านั้น
+- Low Priority = Accumulated Drift: หากตั้ง priority ต่ำ callback อาจถูก preempt บ่อย โดยเฉพาะเมื่อ CPU load สูง ทำให้ Timer accuracy ลดลง และ periodic task เกิด phase shift
+- ✅ แนวทาง:
+  - Timer Service Task ≥ priority ของ application task ที่ใช้ callback
+  - ใช้ configTIMER_TASK_PRIORITY ใน FreeRTOSConfig.h ตั้งอย่างน้อย 3 หรือตามระดับ real-time ที่ต้องการ
+  - สำหรับ ESP-IDF v5.x ถ้าใช้ esp_timer (ใช้ hardware microsecond timer) ไม่ต้องปรับ priority มากนัก เพราะ มัน อยู่ ใน ISR context อยู่แล้ว
+2. Callback Performance: วิธีการเพิ่มประสิทธิภาพ Callback Functions?
+- Avoid Blocking: ห้าม vTaskDelay() หรือ loop นาน ใน callback; ส่ง event ผ่าน queue ไปยัง worker task แทน
+- Minimize Workload: แยก callback ให้เหลือเพียง “notification + timestamp capture” ส่วน งานหลัก คำนวณ ใน task ภายนอก
+- Use Static Memory: หลีกเลี่ยง malloc() ใน callback โดยเตรียม static buffer ล่วงหน้า เพื่อ ลด heap fragmentation
+- Profile Execution Time: ใช้ esp_timer_get_time() รอบ callback เพื่อวัด latency และ ปรับ period หรือ WCET ใน Adaptive Controller
+3. Memory Management: กลยุทธ์การจัดการ Memory สำหรับ Dynamic Timers?
+- Static Pool First: สร้าง timer object จาก static array (StaticTimer_t) ก่อน ใช้ dynamic allocation
+- Dynamic แต่ Bounded: ถ้าต้องสร้าง/ลบ timer บ่อย ใช้ pvTimerGetTimerID() เช็กสถานะ reuse object แทนการสร้างใหม่
+- Periodic vs One-shot: แยก pool สองแบบ เพื่อลด fragmentation ของ heap
+- Monitor Stack/Heap: ใช้ uxTaskGetStackHighWaterMark() และ heap_caps_get_free_size() เช็ก memory pressure เพื่อ trigger adaptive timer ลดจำนวน active timers อัตโนมัติ
+4. Error Recovery: วิธีการ Handle Timer System Failures?
+- Watchdog Integration: หาก Timer Service Task hang ให้ มี Watchdog reset หรือ restart timer pool
+- Redundant Timers: สำหรับ critical task สร้าง dual timer ที่ backup กัน (เมื่อ ตัวหลัก ไม่ callback ภายใน timeout backup ทำงานแทน)
+- Auto-Recreate: เช็ก xTimerIsTimerActive() ; หาก false ทั้งที่ ควร active → xTimerStartFromISR() ใหม่
+- Central Error Log: log event เช่น timer_overrun, callback_miss, queue_full เพื่อ วิเคราะห์ หลังบ้าน ใน production
+5. Production Deployment: การปรับแต่งสำหรับ Production Environment?
+- Fine-Tune Tick Rate: ตั้ง configTICK_RATE_HZ = 1000 ถ้าต้องการ 1 ms granularity; สำหรับ power-save ลดเหลือ 100–250 Hz
+- Pin Timer Tasks to Core: ใน ESP32 ใช้ xTaskCreatePinnedToCore() ให้ Timer/Service Task รันบน Core 0 ส่วน App Task บน Core 1 ลด interrupt jitter
+- Use esp_timer แทน Software Timer: ถ้าต้อง accuracy ระดับ μs หรือ มี จำนวน timer มาก (esp_timer ใช้ hardware interrupt และ min jitter < 20 µs)
+- Adaptive Control Enable: เปิด controller เฉพาะใน production (เช่น “auto-tune mode”) พร้อม log CSV ออก UART หรือ MQTT เพื่อ วิเคราะห์ trend
+- Fail-Safe Mode: ถ้า utilization > 95% และ miss > 10% → switch ระบบ เข้า safe-config เช่น เพิ่ม period ทุกงาน 20% อัตโนมัติ
+
+### 🚀 ความท้าทายระดับผู้เชี่ยวชาญ
+- Challenge 1: Real-time Scheduler
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/173d06dd-47cc-4e9e-9fcf-b774ced49891" />
+
+- Challenge 2: Distributed Timer System
+<img width="1907" height="1079" alt="image" src="https://github.com/user-attachments/assets/0bd97072-0097-4f3e-9b8c-5c85812fd5b2" />
+
+- Challenge 3: Adaptive Performance
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/04434aa4-480e-4b4f-ad63-14ecfe2721ce" />
