@@ -121,7 +121,7 @@ esp_log_level_set("LOGGING_DEMO", ESP_LOG_DEBUG);
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/bc1d610a-3efb-4071-af4d-fcfd3fc0152c" />
 
 - Exercise 2
-![Uploading image.png…]()
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/dd836d76-fc7c-40a1-9ad1-253dd8abe718" />
 
 ### คำถามทบทวน
 1. เหตุใด Task function ต้องมี infinite loop?
