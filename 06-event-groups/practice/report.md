@@ -41,8 +41,10 @@
 
 ### 🚀 ความท้าทายเพิ่มเติม
 1. **Dynamic Barrier Size**: เปลี่ยนจำนวน workers แบบ runtime
+<img width="1918" height="1078" alt="image" src="https://github.com/user-attachments/assets/b826fc0b-b132-45e0-b438-c7241b766248" />
 
 2. **Priority-based Pipeline**: จัดลำดับ pipeline ตาม priority
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/8bc7b942-aa15-4749-bb86-bd6ce0e3e4f7" />
 
 3. **Fault-tolerant Synchronization**: จัดการ task failures
 
