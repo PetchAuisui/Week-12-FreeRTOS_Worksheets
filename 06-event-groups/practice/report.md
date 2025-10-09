@@ -47,7 +47,10 @@
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/8bc7b942-aa15-4749-bb86-bd6ce0e3e4f7" />
 
 3. **Fault-tolerant Synchronization**: จัดการ task failures
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/1e4f9f70-ae80-4ecf-9793-b48360584325" />
 
 4. **Load-balanced Processing**: กระจายโหลดแบบ dynamic
+<img width="1919" height="1079" alt="Screenshot 2025-10-09 233444" src="https://github.com/user-attachments/assets/06fabcfe-758d-435c-a065-297dfcc75690" />
 
 5. **Cross-group Synchronization**: synchronization ระหว่าง event groups
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/0331d1c3-2c2c-474c-a3e2-6479ff12a1eb" />
