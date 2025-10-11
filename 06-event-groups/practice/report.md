@@ -75,7 +75,7 @@
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/7cd130c1-fa54-4968-aa2c-ce61145853ae" />
 
 3. **Mobile App Integration**: เชื่อมต่อกับ mobile app
-<img width="1916" height="1079" alt="Screenshot 2025-10-12 011032" src="https://github.com/user-attachments/assets/9c0144e3-f9b9-4180-bf23-28f3176a0756" />
+<img width="1919" height="1079" alt="Screenshot 2025-10-12 011032" src="https://github.com/user-attachments/assets/9c0144e3-f9b9-4180-bf23-28f3176a0756" />
 
 4. **Cloud Analytics**: ส่งข้อมูลไป cloud สำหรับวิเคราะห
 ์<img width="1919" height="1079" alt="Screenshot 2025-10-12 020443" src="https://github.com/user-attachments/assets/d3921026-e5ed-4cf5-b90c-c4db24147841" />
