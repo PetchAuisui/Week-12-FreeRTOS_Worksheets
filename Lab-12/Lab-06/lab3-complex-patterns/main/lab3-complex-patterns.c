@@ -1,66 +1,20 @@
-// lab3-ml.c — TinyML-style logistic scoring on ESP32 (no external libs)
+// lab3-voice.c — Voice via Serial Commands (simulate speech recognition)
 #include <stdio.h>
-#include <math.h>
 #include <string.h>
+#include <ctype.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#include "esp_random.h"
 #include "driver/gpio.h"
+#include "driver/uart.h"
+#include "esp_vfs_dev.h"
+#include "esp_log.h"
 
-static const char *TAG = "ML_DEMO";
+static const char *TAG = "VOICE_SIM";
 
 // LEDs
 #define LED_LIVING_ROOM GPIO_NUM_2
 #define LED_KITCHEN GPIO_NUM_4
 #define LED_BEDROOM GPIO_NUM_5
-
-// Events (จำลอง)
-typedef struct
-{
-    uint32_t temp_c;
-    uint32_t light_level; // 0-100
-    uint8_t motion;       // 0/1
-} features_t;
-
-static inline float sigmoidf_fast(float x)
-{
-    if (x > 8.0f)
-        return 0.9997f;
-    if (x < -8.0f)
-        return 0.0003f;
-    return 1.0f / (1.0f + expf(-x));
-}
-
-// “โมเดล” แบบ logistic regression (เทรนไว้ล่วงหน้าเชิงสมมติ)
-typedef struct
-{
-    float w_temp;   // น้ำหนักอุณหภูมิ (normalize ~ 0..40C)
-    float w_light;  // น้ำหนักแสง      (0..100%)
-    float w_motion; // น้ำหนัก motion   (0/1)
-    float bias;     // ค่าคงที่
-} lr_model_t;
-
-static lr_model_t model_wakeup = {
-    .w_temp = -0.05f,  // อุ่นไป → ไม่ค่อยตื่น
-    .w_light = 0.03f,  // สว่างขึ้น → มีแนวโน้มตื่น
-    .w_motion = 1.20f, // มี motion → ใกล้ตื่น
-    .bias = -1.2f      // ฐานโน้มว่าจะยังไม่ตื่น
-};
-
-static lr_model_t model_return_home = {
-    .w_temp = 0.00f,
-    .w_light = 0.01f,
-    .w_motion = 0.90f, // มี motion ที่ประตู/ห้องนั่งเล่น
-    .bias = -1.0f};
-
-static float predict_prob(const lr_model_t *m, const features_t *f)
-{
-    float x = m->w_temp * (float)f->temp_c + m->w_light * (float)f->light_level + m->w_motion * (float)f->motion + m->bias;
-    return sigmoidf_fast(x);
-}
 
 static void set_leds(bool lr, bool kit, bool bed)
 {
@@ -69,73 +23,82 @@ static void set_leds(bool lr, bool kit, bool bed)
     gpio_set_level(LED_BEDROOM, bed);
 }
 
-static void sensor_sim_task(void *pv)
+static void trim_lower(char *s)
 {
-    ESP_LOGI(TAG, "Sensor simulator started");
-    while (1)
-    {
-        vTaskDelay(pdMS_TO_TICKS(10000));
-    }
+    int n = (int)strlen(s);
+    while (n > 0 && (s[n - 1] == '\r' || s[n - 1] == '\n' || isspace((unsigned char)s[n - 1])))
+        s[--n] = 0;
+    while (*s && isspace((unsigned char)*s))
+        memmove(s, s + 1, strlen(s));
+    for (char *p = s; *p; ++p)
+        *p = (char)tolower((unsigned char)*p);
 }
 
-static void ml_inference_task(void *pv)
+static void voice_uart_task(void *pv)
 {
-    ESP_LOGI(TAG, "ML inference started");
-    uint32_t step = 0;
+    ESP_LOGI(TAG, "Type: on | off | kitchen | bedroom | goodnight | wake");
+    char line[64];
     while (1)
     {
-        // สร้างฟีเจอร์จำลอง
-        features_t f = {
-            .temp_c = 20 + (esp_random() % 15), // 20-34C
-            .light_level = esp_random() % 100,  // 0-99%
-            .motion = (esp_random() % 100) < 20 // 20% chance
-        };
-
-        float p_wakeup = predict_prob(&model_wakeup, &f);
-        float p_return = predict_prob(&model_return_home, &f);
-
-        // smoothing เล็กน้อย
-        static float ema_w = 0.0f, ema_r = 0.0f;
-        ema_w = 0.6f * ema_w + 0.4f * p_wakeup;
-        ema_r = 0.6f * ema_r + 0.4f * p_return;
-
-        ESP_LOGI(TAG,
-                 "F(temp=%uC,light=%u%%,motion=%u) => WakeUp=%.2f (ema=%.2f), Return=%.2f (ema=%.2f)",
-                 f.temp_c, f.light_level, f.motion, p_wakeup, ema_w, p_return, ema_r);
-
-        // นโยบายควบคุมอุปกรณ์จากผลทำนาย
-        if (ema_w > 0.75f)
+        if (fgets(line, sizeof(line), stdin) == NULL)
         {
-            ESP_LOGI(TAG, "☀️ Predicted WAKE-UP → เปิดไฟห้องนอนและครัว");
-            set_leds(false, true, true);
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
         }
-        else if (ema_r > 0.65f)
-        {
-            ESP_LOGI(TAG, "🚪 Predicted RETURN HOME → เปิดไฟห้องนั่งเล่น");
-            set_leds(true, false, false);
-        }
-        else
-        {
-            set_leds(false, false, false);
-        }
+        trim_lower(line);
 
-        if (++step % 6 == 0)
+        if (!strcmp(line, "on"))
         {
-            ESP_LOGI(TAG, "— periodic idle —");
+            gpio_set_level(LED_LIVING_ROOM, 1);
+            ESP_LOGI(TAG, "💡 Living room ON");
         }
-
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        else if (!strcmp(line, "off"))
+        {
+            gpio_set_level(LED_LIVING_ROOM, 0);
+            ESP_LOGI(TAG, "💡 Living room OFF");
+        }
+        else if (!strcmp(line, "kitchen"))
+        {
+            gpio_set_level(LED_KITCHEN, 1);
+            ESP_LOGI(TAG, "🍳 Kitchen light ON");
+        }
+        else if (!strcmp(line, "bedroom"))
+        {
+            gpio_set_level(LED_BEDROOM, 1);
+            ESP_LOGI(TAG, "🛏 Bedroom light ON");
+        }
+        else if (!strcmp(line, "goodnight"))
+        {
+            set_leds(0, 0, 1);
+            ESP_LOGI(TAG, "🌙 Goodnight routine");
+        }
+        else if (!strcmp(line, "wake"))
+        {
+            set_leds(0, 1, 1);
+            ESP_LOGI(TAG, "☀️ Wake-up routine");
+        }
+        else if (strlen(line) > 0)
+        {
+            ESP_LOGW(TAG, "Unknown: %s", line);
+        }
     }
 }
 
 void app_main(void)
 {
+    // Map stdin/stdout to UART0 using driver
+    const int uart_num = 0;
+    uart_driver_install(uart_num, 256, 0, 0, NULL, 0);
+    esp_vfs_dev_uart_use_driver(uart_num);
+    setvbuf(stdin, NULL, _IONBF, 0);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     gpio_set_direction(LED_LIVING_ROOM, GPIO_MODE_OUTPUT);
     gpio_set_direction(LED_KITCHEN, GPIO_MODE_OUTPUT);
     gpio_set_direction(LED_BEDROOM, GPIO_MODE_OUTPUT);
-    set_leds(false, false, false);
+    set_leds(0, 0, 0);
 
-    xTaskCreate(sensor_sim_task, "sensor_sim", 2048, NULL, 4, NULL);
-    xTaskCreate(ml_inference_task, "ml_task", 4096, NULL, 5, NULL);
-    ESP_LOGI(TAG, "ML demo running");
+    xTaskCreate(voice_uart_task, "voice_uart", 4096, NULL, 4, NULL);
+    ESP_LOGI(TAG, "Voice (UART) ready. Open monitor and type commands.");
 }
