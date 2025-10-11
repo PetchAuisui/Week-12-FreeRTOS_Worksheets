@@ -67,3 +67,18 @@
 - Event Sequence Visualization:
 <img width="1918" height="1079" alt="image" src="https://github.com/user-attachments/assets/1a715975-f032-407b-a782-5a9d97f07f92" />
 
+### 🚀 ความท้าทายเพิ่มเติม
+1. **Machine Learning Integration**: เพิ่ม basic ML algorithms
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/af55b7df-b623-4366-9008-e08cee9ecc01" />
+
+2. **Voice Pattern Recognition**: จดจำ voice commands
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/7cd130c1-fa54-4968-aa2c-ce61145853ae" />
+
+3. **Mobile App Integration**: เชื่อมต่อกับ mobile app
+<img width="1916" height="1079" alt="Screenshot 2025-10-12 011032" src="https://github.com/user-attachments/assets/9c0144e3-f9b9-4180-bf23-28f3176a0756" />
+
+4. **Cloud Analytics**: ส่งข้อมูลไป cloud สำหรับวิเคราะห
+์<img width="1919" height="1079" alt="Screenshot 2025-10-12 020443" src="https://github.com/user-attachments/assets/d3921026-e5ed-4cf5-b90c-c4db24147841" />
+
+5. **Multi-home Coordination**: ประสานงานระหว่างหลายบ้าน
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/886b414e-f88b-4ae9-a330-2b4e8c036145" />
