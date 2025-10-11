@@ -54,3 +54,16 @@
 
 5. **Cross-group Synchronization**: synchronization ระหว่าง event groups
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/0331d1c3-2c2c-474c-a3e2-6479ff12a1eb" />
+
+## Lab 3: Complex Event Patterns (30 นาที)
+### result
+<img width="1919" height="1079" alt="Screenshot 2025-10-11 234757" src="https://github.com/user-attachments/assets/35f3bb07-31a3-4a4b-9636-87c23e0361c8" />
+
+### 📊 Advanced Event Analysis
+
+- เพิ่ม Event Correlation Metrics:
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/01f8ad6e-2ec9-40e3-aa78-205ef8c55efc" />
+
+- Event Sequence Visualization:
+<img width="1918" height="1079" alt="image" src="https://github.com/user-attachments/assets/1a715975-f032-407b-a782-5a9d97f07f92" />
+
