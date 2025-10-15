@@ -21,6 +21,13 @@
 <img width="1919" height="1076" alt="image" src="https://github.com/user-attachments/assets/677617f1-0ef6-4aec-b713-a040312ea1e1" />
 
 3. Shared Memory: สร้างระบบ shared memory ระหว่าง tasks
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/67801b27-3698-4a54-90f7-2885c75af7b4" />
+
 4. Memory Encryption: เพิ่ม encryption สำหรับ sensitive data
+<img width="1919" height="1077" alt="image" src="https://github.com/user-attachments/assets/175920d4-2923-46e4-b900-f399093b196c" />
+
 5. Dynamic Memory Pools: สร้าง memory pools ที่ปรับขนาดได้
+<img width="1918" height="1079" alt="image" src="https://github.com/user-attachments/assets/66b74d30-af7c-419e-815e-495fc7a3c2ad" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/b107ba50-d8b7-4b65-8eeb-dc21e3541706" />
+
 
