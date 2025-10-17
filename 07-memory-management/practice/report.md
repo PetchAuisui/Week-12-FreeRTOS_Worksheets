@@ -62,3 +62,32 @@
 
 ## Lab 3: Memory Optimization
 ### Result
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/ba1248e6-6381-47cc-b11b-6dd331c08dee" />
+
+
+### 📊 การวิเคราะห์ Optimization Results
+- Memory Savings Calculator:
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/1c95ebb7-c323-4285-801b-8d00f4c85b42" />
+
+### 🔧 Advanced Optimization Techniques
+- Memory Pool with Template Sizes:
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/dcacc0ea-2aaa-4d15-b5a5-111bc98b8c14" />
+
+
+### 🚀 ความท้าทายเพิ่มเติม
+1. **Automatic Memory Tuning**: สร้างระบบปรับแต่ง memory อัตโนมัติ
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/1b0b25f5-5e04-49d0-89cd-985cee18bd45" />
+
+2. **Custom Memory Allocators**: เขียน allocator สำหรับ specific use cases
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/c46cba78-1d69-418c-95b2-e7c43b10ec69" />
+
+3. **Memory Compression**: ใช้ compression algorithms สำหรับ large data
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/e60be020-f7ae-44e2-b267-daf7ceef4da4" />
+
+4. **NUMA-aware Allocation**: จัดการ memory บน multi-core systems
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/32dcbdbf-346d-464c-89b4-320b0bc84279" />
+
+5. **Predictive Memory Management**: ทำนาย memory usage patterns
+<img width="1919" height="1078" alt="image" src="https://github.com/user-attachments/assets/c3d90317-b7d9-4ad9-b790-e0eccb7f379f" />
+
+
