@@ -13,8 +13,8 @@
 - [07-memory-management](./07-memory-management/practice/report.md)
 - [08-esp-idf-specific](./08-esp-idf-specific/report.md)
 
-
-
+### 💾 บันทึกการเขียน code ของ Week-12-FreeRTOS
+- [เปิดดูcode](./Lab-12)
 ## 📚 เนื้อหาการเรียนรู้
 
 ### 0. [วิวัฒนาการของ Multitasking ในไมโครคอนโทรลเลอร์](00-multitasking-evolution/)
