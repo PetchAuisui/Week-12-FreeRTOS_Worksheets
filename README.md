@@ -10,6 +10,7 @@
 - [03-queues](./03-queues/practice/report.md)
 - [04-semaphores](./04-semaphores/practice/report.md)
 - [05-timers](./05-timers/practice/report.md)
+- [06-event-groups](./06-event-groups/practice/report.md)
 - [07-memory-management](./07-memory-management/practice/report.md)
 - [08-esp-idf-specific](./08-esp-idf-specific/report.md)
 
