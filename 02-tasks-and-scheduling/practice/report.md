@@ -105,7 +105,7 @@
   - ความลึกของการเรียกฟังก์ชัน (function call depth)
   - ความซับซ้อนของโค้ด เช่น recursion, snprintf, sprintf, log ที่ใช้ buffer
   - การเผื่อ safety margin ประมาณ 30–50% ของการใช้งานสูงสุดที่คาดไว้
-  - ใช้ข้อมูลจริงจาก `uxTaskGetStackHighWaterMark()` เพื่อปรับปรุงภายหลัง
+  - ใช้ข้อมูลจริงจาก uxTaskGetStackHighWaterMark() เพื่อปรับปรุงภายหลัง
 5. Recursion ส่งผลต่อ stack usage อย่างไร?
 - Recursion ทำให้ stack usage เพิ่มขึ้นตามระดับความลึกของการเรียกซ้ำ (depth) เพราะทุกครั้งที่ฟังก์ชันเรียกตัวเอง ระบบจะต้อง:
   - เก็บค่าตัวแปร local ของรอบก่อน
