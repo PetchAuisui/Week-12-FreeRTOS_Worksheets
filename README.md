@@ -1,6 +1,19 @@
 # FreeRTOS Learning Materials for ESP-IDF
 
 เนื้อหาและใบงานการเรียนรู้ FreeRTOS สำหรับแพลตฟอร์ม ESP-IDF พัฒนาด้วย VS Code ผ่าน Terminal โดยใช้ `idf.py`
+## ✅ Week 12 — FreeRTOS Report Summary
+รวมลิงก์ไปยังรายงาน (`report.md`) ของแต่ละหัวข้อ
+### 📄 เปิดรายงาน
+- [00-multitasking-evolution](./00-multitasking-evolution/practice/report.md)
+- [01-freertos-overview](./01-freertos-overview/practice/report.md)
+- [02-tasks-and-scheduling](./02-tasks-and-scheduling/practice/report.md)
+- [03-queues](./03-queues/practice/report.md)
+- [04-semaphores](./04-semaphores/practice/report.md)
+- [05-timers](./05-timers/practice/report.md)
+- [07-memory-management](./07-memory-management/practice/report.md)
+- [08-esp-idf-specific](./08-esp-idf-specific/report.md)
+
+
 
 ## 📚 เนื้อหาการเรียนรู้
 
